@@ -33,9 +33,8 @@ Save and restore editor state across restarts.
 - Path canonicalization needed for consistent hashing across relative vs absolute path forms
 - Started in `helix-view/src/session.rs` (reverted), integration test in `helix-term/tests/test/session.rs` (reverted)
 
-## Scroll bar with diagnostic lines
-
 ## Minimap
+- Maybe, the scroll bard did a lot of that work for me
 
 ## Filter workspace search with file regex
 

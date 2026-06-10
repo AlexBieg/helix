@@ -49,3 +49,17 @@ Custom features added on top of upstream Helix.
 - Mouse wheel scrolling in the preview area (3 lines per tick)
 - Scroll position resets automatically when the selected item changes
 - Implemented in the generic `Picker` component via `preview_scroll` offset tracking
+
+### Editor scrollbar
+- Renders a vertical scrollbar in the rightmost column of a view when the buffer is taller than the viewport
+- Thumb height and position reflect the buffer length and current scroll offset
+- Styled via the new `ui.buffer.scroll` theme key (`fg` sets thumb color, `bg` sets track color), falling back to `ui.menu.scroll` when unset
+- Added `ui.buffer.scroll` to the default `theme.toml` and documented it in `book/src/themes.md`
+- Implemented in `render_view` in `helix-term/src/ui/editor.rs`
+
+### Diagnostic markers in the scrollbar track
+- Draws diagnostic markers (`▂`) in the column just left of the scrollbar thumb, positioned by each diagnostic's line relative to the buffer length
+- Color reflects severity: `error`, `warning`, `info`, and `hint` theme keys (unknown severity is treated as a warning)
+- Gives an at-a-glance overview of where problems sit throughout the whole file
+- Thumb is drawn on top of the markers so the current viewport position stays visible
+- Implemented in `render_view` in `helix-term/src/ui/editor.rs`
