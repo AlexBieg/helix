@@ -221,6 +221,33 @@ impl EditorView {
             decorations,
         );
 
+        // Render scrollbar if buffer is taller than viewport
+        let text = doc.text().slice(..);
+        let total_lines = text.len_lines();
+        let viewport_height = inner.height as usize;
+        if total_lines > viewport_height {
+            let scroll_style = theme
+                .try_get("ui.buffer.scroll")
+                .unwrap_or_else(|| theme.get("ui.menu.scroll"));
+            let scroll_height = viewport_height
+                .pow(2)
+                .div_ceil(total_lines)
+                .min(viewport_height);
+            let current_scroll = text.char_to_line(view_offset.anchor.min(text.len_chars()));
+            let scroll_line = (viewport_height - scroll_height) * current_scroll
+                / std::cmp::max(1, total_lines.saturating_sub(viewport_height));
+            let x = inner.right().saturating_sub(1);
+            for i in 0..viewport_height {
+                let cell = &mut surface[(x, inner.top() + i as u16)];
+                cell.reset();
+                if scroll_line <= i && i < scroll_line + scroll_height {
+                    cell.set_symbol("▐");
+                    cell.set_fg(scroll_style.fg.unwrap_or(Color::Reset));
+                    cell.set_bg(scroll_style.bg.unwrap_or(Color::Reset));
+                }
+            }
+        }
+
         // if we're not at the edge of the screen, draw a right border
         if viewport.right() != view.area.right() {
             let x = area.right();
