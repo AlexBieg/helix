@@ -1,0 +1,11 @@
+FEATURES.md
+  ai_agent 52-65
+FUTURE.md
+  ai_agent 37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "7c4229650ac9aaeef9cf15ea2a051b2d8bf35194",
+  "prompts": {}
+}
