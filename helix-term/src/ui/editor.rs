@@ -44,6 +44,9 @@ pub struct EditorView {
     spinners: ProgressSpinners,
     /// Tracks if the terminal window is focused by reaction to terminal focus events
     terminal_focused: bool,
+    /// Per-buffer x-coordinate ranges in the bufferline, populated during render.
+    /// Used for mouse click switching.
+    bufferline_ranges: Vec<(helix_view::DocumentId, u16, u16)>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +70,7 @@ impl EditorView {
             completion: None,
             spinners: ProgressSpinners::default(),
             terminal_focused: true,
+            bufferline_ranges: Vec::new(),
         }
     }
 
@@ -660,7 +664,13 @@ impl EditorView {
     }
 
     /// Render bufferline at the top
-    pub fn render_bufferline(editor: &Editor, viewport: Rect, surface: &mut Surface) {
+    pub fn render_bufferline(
+        editor: &Editor,
+        viewport: Rect,
+        surface: &mut Surface,
+        ranges: &mut Vec<(helix_view::DocumentId, u16, u16)>,
+    ) {
+        ranges.clear();
         let scratch = PathBuf::from(SCRATCH_BUFFER_NAME); // default filename to use for scratch buffer
         surface.clear_with(
             viewport,
@@ -702,9 +712,11 @@ impl EditorView {
             let used_width = viewport.x.saturating_sub(x);
             let rem_width = surface.area.width.saturating_sub(used_width);
 
+            let start_x = x;
             x = surface
                 .set_stringn(x, viewport.y, &text, rem_width as usize, style)
                 .0;
+            ranges.push((doc.id(), start_x, x));
 
             if x >= surface.area.right() {
                 break;
@@ -1226,6 +1238,19 @@ impl EditorView {
             MouseEventKind::Down(MouseButton::Left) => {
                 let editor = &mut cxt.editor;
 
+                // Check if click is on the bufferline row (always the first row of the editor area)
+                if matches!(row, 0) && !self.bufferline_ranges.is_empty() {
+                    for &(doc_id, start_x, end_x) in &self.bufferline_ranges {
+                        if column >= start_x && column < end_x {
+                            let current_doc = view!(editor).doc;
+                            if doc_id != current_doc {
+                                editor.switch(doc_id, helix_view::editor::Action::Replace);
+                            }
+                            return EventResult::Consumed(None);
+                        }
+                    }
+                }
+
                 if let Some((pos, view_id)) = pos_and_view(editor, row, column, true) {
                     editor.focus(view_id);
 
@@ -1623,7 +1648,7 @@ impl Component for EditorView {
         cx.editor.resize(editor_area);
 
         if use_bufferline {
-            Self::render_bufferline(cx.editor, area.with_height(1), surface);
+            Self::render_bufferline(cx.editor, area.with_height(1), surface, &mut self.bufferline_ranges);
         }
 
         for (view, is_focused) in cx.editor.tree.views() {
