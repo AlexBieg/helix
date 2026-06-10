@@ -413,6 +413,7 @@ impl MappableCommand {
         syntax_symbol_picker, "Open symbol picker from syntax information",
         lsp_or_syntax_symbol_picker, "Open symbol picker from LSP or syntax information",
         changed_file_picker, "Open changed file picker",
+        recent_file_picker, "Open recent file picker",
         select_references_to_symbol_under_cursor, "Select symbol references",
         workspace_symbol_picker, "Open workspace symbol picker",
         syntax_workspace_symbol_picker, "Open workspace symbol picker from syntax information",
@@ -3570,6 +3571,44 @@ fn changed_file_picker(cx: &mut Context) {
                 true
             }
         });
+    cx.push_layer(Box::new(overlaid(picker)));
+}
+
+fn recent_file_picker(cx: &mut Context) {
+    let recent: Vec<PathBuf> = cx
+        .editor
+        .recent_files
+        .iter()
+        .filter(|p| p.exists())
+        .cloned()
+        .collect();
+
+    if recent.is_empty() {
+        cx.editor.set_error("No recent files");
+        return;
+    }
+
+    let columns = [PickerColumn::new("path", |path: &PathBuf, config: &PathStyleConfig| {
+        config.stylize(Some(path.as_path()), None)
+    })];
+
+    let picker = Picker::new(
+        columns,
+        0,
+        recent,
+        PathStyleConfig::new(&cx.editor.theme),
+        |cx, path: &PathBuf, action| {
+            if let Err(e) = cx.editor.open(path, action) {
+                let err = if let Some(err) = e.source() {
+                    format!("{}", err)
+                } else {
+                    format!("unable to open \"{}\"", path.display())
+                };
+                cx.editor.set_error(err);
+            }
+        },
+    )
+    .with_preview(|_editor, path| Some((path.as_path().into(), None)));
     cx.push_layer(Box::new(overlaid(picker)));
 }
 

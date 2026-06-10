@@ -23,3 +23,10 @@ Custom features added on top of upstream Helix.
 - Tracks per-buffer x-coordinate ranges during bufferline rendering
 - Left-click on a buffer name in the bufferline switches to that buffer
 - Uses existing `editor.switch()` with `Action::Replace`
+
+### Recent file picker
+- Tracks all opened files in MRU order via `Editor::recent_files`
+- Files remain in the list even after closing the buffer
+- Deduplicates and caps at 100 entries
+- Accessible via `space R` or `:recent_file_picker`
+- Includes file preview panel on selection

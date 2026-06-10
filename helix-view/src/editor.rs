@@ -1294,6 +1294,10 @@ pub struct Editor {
 
     pub file_watcher: FileWatcher,
     pub file_watcher_rx: UnboundedReceiver<PathBuf>,
+
+    /// Recently opened files in MRU order (most recent first).
+    /// Includes files whose buffers are now closed.
+    pub recent_files: Vec<PathBuf>,
 }
 
 pub type Motion = Box<dyn Fn(&mut Editor)>;
@@ -1421,6 +1425,7 @@ impl Editor {
             dir_stack: VecDeque::with_capacity(DIR_STACK_CAP),
             file_watcher,
             file_watcher_rx,
+            recent_files: Vec::new(),
         }
     }
 
@@ -2054,9 +2059,20 @@ impl Editor {
         self.document_by_path(path).map(|doc| doc.id)
     }
 
+    /// Track a file as recently opened, maintaining MRU order and deduplication.
+    pub fn track_recent_file(&mut self, path: &Path) {
+        // Remove any existing entry for this path (to dedupe and move to front)
+        self.recent_files.retain(|p| p != path);
+        self.recent_files.insert(0, path.to_path_buf());
+        // Cap at a reasonable limit
+        const MAX_RECENT_FILES: usize = 100;
+        self.recent_files.truncate(MAX_RECENT_FILES);
+    }
+
     // ??? possible use for integration tests
     pub fn open(&mut self, path: &Path, action: Action) -> Result<DocumentId, DocumentOpenError> {
         let path = helix_stdx::path::canonicalize(path);
+        self.track_recent_file(&path);
         let id = self.document_id_by_path(&path);
 
         let id = if let Some(id) = id {
@@ -2164,6 +2180,8 @@ impl Editor {
             if let Err(e) = self.file_watcher.unwatch(path) {
                 log::warn!("failed to stop watching file {:?}: {:?}", path, e);
             }
+            // Keep the file in the recent files list even after closing
+            self.track_recent_file(path);
         }
 
         // If the document we removed was visible in all views, we will have no more views. We don't

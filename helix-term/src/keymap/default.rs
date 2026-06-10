@@ -234,6 +234,7 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "d" => diagnostics_picker,
             "D" => workspace_diagnostics_picker,
             "g" => changed_file_picker,
+            "R" => recent_file_picker,
             "a" => code_action,
             "'" => last_picker,
             "G" => { "Debug (experimental)" sticky=true
@@ -283,7 +284,6 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "Y" => yank_main_selection_to_clipboard,
             "p" => paste_clipboard_after,
             "P" => paste_clipboard_before,
-            "R" => replace_selections_with_clipboard,
             "/" => global_search,
             "k" => hover,
             "r" => rename_symbol,
