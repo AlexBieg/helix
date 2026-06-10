@@ -764,6 +764,23 @@ impl Application {
                 }
                 self.render().await;
             }
+            EditorEvent::GitHeadChanged => {
+                // Refresh diff bases for all open documents when git HEAD changes
+                let doc_ids: Vec<helix_view::DocumentId> =
+                    self.editor.documents.keys().copied().collect();
+                for doc_id in doc_ids {
+                    if let Some(doc) = self.editor.documents.get_mut(&doc_id) {
+                        if let Some(path) = doc.path().map(ToOwned::to_owned) {
+                            if let Some(diff_base) =
+                                self.editor.diff_providers.get_diff_base(&path)
+                            {
+                                doc.set_diff_base(diff_base);
+                            }
+                        }
+                    }
+                }
+                helix_event::request_redraw();
+            }
         }
 
         false

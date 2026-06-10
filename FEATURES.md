@@ -12,6 +12,7 @@ Custom features added on top of upstream Helix.
 - Shows status warning for dirty buffers instead of overwriting unsaved changes
 - Debounce support to prevent rapid successive reloads
 - Notifies LSP via `file_event_handler` on reload
+- Watches `.git/HEAD` to refresh gutter diff after git commits
 - Config:
   ```toml
   [editor.file-watcher]

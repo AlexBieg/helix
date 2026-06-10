@@ -1302,6 +1302,19 @@ pub struct Editor {
 
 pub type Motion = Box<dyn Fn(&mut Editor)>;
 
+/// Walk up the directory tree from `path` looking for a `.git` directory.
+fn find_git_dir(path: &Path) -> Option<PathBuf> {
+    let mut current = path.parent();
+    while let Some(dir) = current {
+        let git = dir.join(".git");
+        if git.is_dir() || git.is_file() {
+            return Some(git);
+        }
+        current = dir.parent();
+    }
+    None
+}
+
 #[derive(Debug)]
 pub enum EditorEvent {
     DocumentSaved(DocumentSavedEventResult),
@@ -1309,6 +1322,7 @@ pub enum EditorEvent {
     LanguageServerMessage((LanguageServerId, Call)),
     DebuggerEvent((DebugAdapterId, dap::Payload)),
     FileChanged(DocumentId),
+    GitHeadChanged,
     IdleTimer,
     Redraw,
 }
@@ -2103,6 +2117,16 @@ impl Editor {
                 log::debug!("file watcher could not watch {:?}: {:?}", path, e);
             }
 
+            // Also watch .git/HEAD so we can refresh diff bases after commits
+            if let Some(git_dir) = find_git_dir(&path) {
+                let git_head = git_dir.join("HEAD");
+                if git_head.exists() {
+                    if let Err(e) = self.file_watcher.watch(&git_head) {
+                        log::debug!("file watcher could not watch git HEAD {:?}: {:?}", git_head, e);
+                    }
+                }
+            }
+
             helix_event::dispatch(DocumentDidOpen {
                 editor: self,
                 doc: id,
@@ -2463,6 +2487,10 @@ impl Editor {
                 }
 
                 Some(path) = self.file_watcher_rx.recv() => {
+                    // Check if this is a .git metadata change (e.g. after a commit)
+                    if path.to_string_lossy().contains("/.git/") {
+                        return EditorEvent::GitHeadChanged
+                    }
                     if let Some(doc_id) = self.document_id_by_path(&path) {
                         return EditorEvent::FileChanged(doc_id)
                     }
