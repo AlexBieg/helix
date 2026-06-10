@@ -62,5 +62,3 @@ Discuss the project on the community [Matrix Space](https://matrix.to/#/#helix-c
 # Credits
 
 Thanks to [@jakenvac](https://github.com/jakenvac) for designing the logo!
-
-Testing gutter diff update after auto-reload.
