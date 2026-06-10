@@ -270,6 +270,12 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     /// An event handler for syntax highlighting the currently previewed file.
     preview_highlight_handler: Sender<Arc<Path>>,
     dynamic_query_handler: Option<Sender<DynamicQueryChange>>,
+    /// Additional line offset for preview scrolling (reset on selection change)
+    preview_scroll: usize,
+    /// Height of the preview area (for page scrolling)
+    preview_height: u16,
+    /// Last cursor position used to detect selection changes
+    last_preview_cursor: u32,
 }
 
 impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
@@ -395,6 +401,9 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             file_fn: None,
             preview_highlight_handler: PreviewHighlightHandler::<T, D>::default().spawn(),
             dynamic_query_handler: None,
+            preview_scroll: 0,
+            preview_height: 0,
+            last_preview_cursor: u32::MAX,
         }
     }
 
@@ -897,6 +906,14 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         let inner = inner.inner(margin);
         BLOCK.render(area, surface);
 
+        // Reset preview scroll when selected item changes
+        self.preview_height = inner.height;
+        if self.cursor != self.last_preview_cursor {
+            self.preview_scroll = 0;
+            self.last_preview_cursor = self.cursor;
+        }
+        let mut preview_scroll = self.preview_scroll;
+
         if let Some((preview, range)) = self.get_preview(cx.editor) {
             let doc = match preview.document() {
                 Some(doc)
@@ -956,6 +973,18 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
                 } else {
                     offset.anchor = start;
                 }
+            }
+
+            // Apply manual preview scroll offset
+            if preview_scroll > 0 {
+                let doc_text = doc.text().slice(..);
+                let current_line = doc_text.char_to_line(offset.anchor);
+                let max_line = doc_text.len_lines().saturating_sub(1);
+                let new_line = (current_line + preview_scroll).min(max_line);
+                offset.anchor = doc_text.line_to_char(new_line);
+                offset.vertical_offset = 0;
+                // Clamp scroll to stay within doc bounds
+                preview_scroll = preview_scroll.min(max_line.saturating_sub(current_line));
             }
 
             let loader = cx.editor.syn_loader.load();
@@ -1020,6 +1049,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
                 &cx.editor.theme,
                 decorations,
             );
+            self.preview_scroll = preview_scroll;
         }
     }
 }
@@ -1058,8 +1088,6 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
     }
 
     fn handle_event(&mut self, event: &Event, ctx: &mut Context) -> EventResult {
-        // TODO: keybinds for scrolling preview
-
         let key_event = match event {
             Event::Key(event) => *event,
             Event::Paste(..) => return self.prompt_handle_event(event, ctx),
@@ -1167,6 +1195,27 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             }
             ctrl!('t') => {
                 self.toggle_preview();
+            }
+            // Preview scrolling
+            alt!(Down) => {
+                self.preview_scroll = self.preview_scroll.saturating_add(1);
+            }
+            alt!(Up) => {
+                self.preview_scroll = self.preview_scroll.saturating_sub(1);
+            }
+            alt!(PageDown) => {
+                let page = self.preview_height.max(1) as usize;
+                self.preview_scroll = self.preview_scroll.saturating_add(page);
+            }
+            alt!(PageUp) => {
+                let page = self.preview_height.max(1) as usize;
+                self.preview_scroll = self.preview_scroll.saturating_sub(page);
+            }
+            alt!(Home) => {
+                self.preview_scroll = 0;
+            }
+            alt!(End) => {
+                self.preview_scroll = usize::MAX;
             }
             _ => {
                 self.prompt_handle_event(event, ctx);

@@ -39,8 +39,6 @@ Save and restore editor state across restarts.
 
 ## Filter workspace search with file regex
 
-## Move file preview above or below picker instead of to the side
-
 ## File diffing
 
 ## Merge conflict resolution

@@ -39,3 +39,12 @@ Custom features added on top of upstream Helix.
 - Preview panel now renders below the file list instead of to the right (vertical split)
 - Affects all pickers: file picker, file explorer, buffer picker, symbol picker, global search, diagnostics picker, recent file picker, changed file picker, and DAP pickers
 - Added `MIN_AREA_HEIGHT_FOR_PREVIEW` constant (20 rows) to prevent showing preview when the area is too short
+
+### Scrollable file previews in all pickers
+- Added keyboard-driven scrolling for the preview panel in all pickers
+- `Alt-Up` / `Alt-Down`: scroll preview one line
+- `Alt-PageUp` / `Alt-PageDown`: scroll preview one page
+- `Alt-Home`: reset scroll to top of preview
+- `Alt-End`: scroll to bottom of preview
+- Scroll position resets automatically when the selected item changes
+- Implemented in the generic `Picker` component via `preview_scroll` offset tracking
