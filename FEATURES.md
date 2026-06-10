@@ -63,3 +63,10 @@ Custom features added on top of upstream Helix.
 - Gives an at-a-glance overview of where problems sit throughout the whole file
 - Thumb is drawn on top of the markers so the current viewport position stays visible
 - Implemented in `render_view` in `helix-term/src/ui/editor.rs`
+
+### Git diff preview in changed file picker
+- Selecting a modified or conflicted file in the changed file picker (`Space-g`) now shows a unified diff between git HEAD and working tree
+- Untracked and renamed files show their regular contents; deleted files show no preview
+- Added `unified_diff()` to `helix-core::diff` for computing diff text from two ropes
+- Added `with_content_preview()` builder to the generic `Picker` component for custom preview content
+- Language detection uses the original filename, so code lines within the diff get syntax highlighting via tree-sitter error recovery; unknown extensions fall back to the `diff` grammar
