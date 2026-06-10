@@ -34,6 +34,10 @@ impl FileWatcher {
         self._watcher.watch(path, RecursiveMode::NonRecursive)
     }
 
+    pub fn watch_dir(&mut self, path: &std::path::Path) -> Result<(), notify::Error> {
+        self._watcher.watch(path, RecursiveMode::Recursive)
+    }
+
     pub fn unwatch(&mut self, path: &std::path::Path) -> Result<(), notify::Error> {
         self._watcher.unwatch(path)
     }

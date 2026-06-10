@@ -2117,12 +2117,19 @@ impl Editor {
                 log::debug!("file watcher could not watch {:?}: {:?}", path, e);
             }
 
-            // Also watch .git/HEAD so we can refresh diff bases after commits
+            // Also watch .git/HEAD and .git/refs so we can refresh
+            // diff bases after commits (HEAD is a symref, branch refs change)
             if let Some(git_dir) = find_git_dir(&path) {
-                let git_head = git_dir.join("HEAD");
-                if git_head.exists() {
-                    if let Err(e) = self.file_watcher.watch(&git_head) {
-                        log::debug!("file watcher could not watch git HEAD {:?}: {:?}", git_head, e);
+                for watch_path in [git_dir.join("HEAD"), git_dir.join("refs")] {
+                    if watch_path.exists() {
+                        let result = if watch_path.is_dir() {
+                            self.file_watcher.watch_dir(&watch_path)
+                        } else {
+                            self.file_watcher.watch(&watch_path)
+                        };
+                        if let Err(e) = result {
+                            log::debug!("file watcher could not watch git {:?}: {:?}", watch_path, e);
+                        }
                     }
                 }
             }
