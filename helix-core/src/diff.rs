@@ -1,4 +1,6 @@
+use std::fmt::Write;
 use std::ops::Range;
+use std::path::Path;
 use std::time::Instant;
 
 use imara_diff::{Algorithm, Diff, Hunk, IndentHeuristic, IndentLevel, InternedInput};
@@ -166,6 +168,50 @@ pub fn compare_ropes(before: &Rope, after: &Rope) -> Transaction {
         Instant::now().duration_since(start).as_secs_f64()
     );
     res
+}
+
+/// Generate a simplified unified diff string between `old` and `new` ropes for the given file path.
+/// Shows changed hunks with old lines prefixed by `-` and new lines prefixed by `+`.
+pub fn unified_diff(old: &Rope, new: &Rope, path: &Path) -> String {
+    let old_str = old.to_string();
+    let new_str = new.to_string();
+    let old_lines: Vec<&str> = old_str.lines().collect();
+    let new_lines: Vec<&str> = new_str.lines().collect();
+
+    let file = InternedInput::new(RopeLines(old.slice(..)), RopeLines(new.slice(..)));
+    let mut diff = Diff::compute(Algorithm::Histogram, &file);
+    diff.postprocess_with_heuristic(
+        &file,
+        IndentHeuristic::new(|token| IndentLevel::for_ascii_line(file.interner[token].bytes(), 4)),
+    );
+
+    let hunks: Vec<_> = diff.hunks().collect();
+
+    if hunks.is_empty() {
+        return String::new();
+    }
+
+    let mut output = String::new();
+    let _ = writeln!(output, "--- a/{}", path.display());
+    let _ = writeln!(output, "+++ b/{}", path.display());
+
+    for hunk in &hunks {
+        let old_start = hunk.before.start + 1;
+        let old_count = hunk.before.len() as u32;
+        let new_start = hunk.after.start + 1;
+        let new_count = hunk.after.len() as u32;
+
+        let _ = writeln!(output, "@@ -{},{} +{},{} @@", old_start, old_count, new_start, new_count);
+
+        for i in hunk.before.clone() {
+            let _ = writeln!(output, "-{}", old_lines.get(i as usize).unwrap_or(&""));
+        }
+        for i in hunk.after.clone() {
+            let _ = writeln!(output, "+{}", new_lines.get(i as usize).unwrap_or(&""));
+        }
+    }
+
+    output
 }
 
 #[cfg(test)]

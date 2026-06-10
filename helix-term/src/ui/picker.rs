@@ -42,7 +42,7 @@ use std::{
 use crate::ui::{Prompt, PromptEvent};
 use helix_core::{
     char_idx_at_visual_offset, fuzzy::MATCHER, movement::Direction,
-    text_annotations::TextAnnotations, unicode::segmentation::UnicodeSegmentation, Position,
+    text_annotations::TextAnnotations, unicode::segmentation::UnicodeSegmentation, Position, Rope,
 };
 use helix_view::{
     editor::Action,
@@ -81,6 +81,9 @@ impl From<DocumentId> for PathOrId<'_> {
 }
 
 type FileCallback<T> = Box<dyn for<'a> Fn(&'a Editor, &'a T) -> Option<FileLocation<'a>>>;
+
+/// Callback to produce preview content as a `Rope` (used for dynamic previews like git diffs).
+type ContentCallback<T> = Box<dyn for<'a> Fn(&'a Editor, &'a T) -> Option<Rope>>;
 
 /// File path and range of lines (used to align and highlight lines)
 pub type FileLocation<'a> = (PathOrId<'a>, Option<(usize, usize)>);
@@ -268,6 +271,9 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     read_buffer: Vec<u8>,
     /// Given an item in the picker, return the file path and line number to display.
     file_fn: Option<FileCallback<T>>,
+    /// If set, this function returns the preview content directly (bypasses file loading).
+    /// Used for dynamic previews like git diffs.
+    content_fn: Option<ContentCallback<T>>,
     /// An event handler for syntax highlighting the currently previewed file.
     preview_highlight_handler: Sender<Arc<Path>>,
     dynamic_query_handler: Option<Sender<DynamicQueryChange>>,
@@ -402,6 +408,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             preview_cache: HashMap::new(),
             read_buffer: Vec::with_capacity(1024),
             file_fn: None,
+            content_fn: None,
             preview_highlight_handler: PreviewHighlightHandler::<T, D>::default().spawn(),
             dynamic_query_handler: None,
             preview_scroll: 0,
@@ -435,6 +442,14 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         // assumption: if we have a preview we are matching paths... If this is ever
         // not true this could be a separate builder function
         self.matcher.update_config(Config::DEFAULT.match_paths());
+        self
+    }
+
+    pub fn with_content_preview(
+        mut self,
+        content_fn: impl for<'a> Fn(&'a Editor, &'a T) -> Option<Rope> + 'static,
+    ) -> Self {
+        self.content_fn = Some(Box::new(content_fn));
         self
     }
 
@@ -596,6 +611,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
 
     /// Get (cached) preview for the currently selected item. If a document corresponding
     /// to the path is already open in the editor, it is used instead.
+    /// If a `content_fn` is set, it takes precedence and the file is not loaded from disk.
     fn get_preview<'picker, 'editor>(
         &'picker mut self,
         editor: &'editor Editor,
@@ -605,19 +621,51 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
 
         match path_or_id {
             PathOrId::Path(path) => {
-                if let Some(doc) = editor.document_by_path(path) {
-                    return Some((Preview::EditorDocument(doc), range));
+                // When content_fn is set (e.g. git diff preview), skip the editor
+                // document check so the dynamic preview takes precedence.
+                if self.content_fn.is_none() {
+                    if let Some(doc) = editor.document_by_path(path) {
+                        return Some((Preview::EditorDocument(doc), range));
+                    }
                 }
 
                 if self.preview_cache.contains_key(path) {
-                    // NOTE: we use `HashMap::get_key_value` here instead of indexing so we can
-                    // retrieve the `Arc<Path>` key. The `path` in scope here is a `&Path` and
-                    // we can cheaply clone the key for the preview highlight handler.
                     let (path, preview) = self.preview_cache.get_key_value(path).unwrap();
                     if matches!(preview, CachedPreview::Document(doc) if doc.syntax().is_none()) {
                         helix_event::send_blocking(&self.preview_highlight_handler, path.clone());
                     }
                     return Some((Preview::Cached(preview), range));
+                }
+
+                // If a content function is set, use it to generate the preview directly
+                // (e.g. for git diffs) instead of loading the file from disk.
+                if let Some(content_fn) = &self.content_fn {
+                    if let Some(rope) = content_fn(editor, current) {
+                        let path: Arc<Path> = path.into();
+                        let mut doc = Document::from(
+                            rope,
+                            None,
+                            editor.config.clone(),
+                            editor.syn_loader.clone(),
+                        );
+                        let loader = editor.syn_loader.load();
+                        // Try the file's original language first (for code-level
+                        // highlighting within diff lines), fall back to diff grammar.
+                        let lang = loader
+                            .language_for_filename(&path)
+                            .or_else(|| loader.language_for_scope("source.diff"));
+                        if let Some(lang) = lang {
+                            doc.language = Some(loader.language(lang).config().clone());
+                            helix_event::send_blocking(
+                                &self.preview_highlight_handler,
+                                path.clone(),
+                            );
+                        }
+                        let preview = CachedPreview::Document(Box::new(doc));
+                        self.preview_cache.insert(path.clone(), preview);
+                        return Some((Preview::Cached(&self.preview_cache[&path]), None));
+                    }
+                    return None;
                 }
 
                 let path: Arc<Path> = path.into();

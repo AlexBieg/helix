@@ -3558,7 +3558,28 @@ fn changed_file_picker(cx: &mut Context) {
             }
         },
     )
-    .with_preview(|_editor, meta| Some((meta.path().into(), None)));
+    .with_preview(|_editor, meta| Some((meta.path().into(), None)))
+        .with_content_preview(move |editor, change: &FileChange| match change {
+            FileChange::Modified { path }
+            | FileChange::Conflict { path } => {
+                let diff_base = editor.diff_providers.get_diff_base(path)?;
+                let current = std::fs::read(path).ok()?;
+                let old = Rope::from(String::from_utf8_lossy(&diff_base).as_ref());
+                let new = Rope::from(String::from_utf8_lossy(&current).as_ref());
+                let diff_text = helix_core::diff::unified_diff(&old, &new, path);
+                if diff_text.is_empty() {
+                    None
+                } else {
+                    Some(Rope::from(diff_text.as_str()))
+                }
+            }
+            FileChange::Untracked { path }
+            | FileChange::Renamed { to_path: path, .. } => {
+                let content = std::fs::read(path).ok()?;
+                Some(Rope::from(String::from_utf8_lossy(&content).as_ref()))
+            }
+            FileChange::Deleted { .. } => None,
+        });
     let injector = picker.injector();
 
     cx.editor
