@@ -47,6 +47,7 @@ use helix_core::{
 use helix_view::{
     editor::Action,
     graphics::{CursorKind, Margin, Modifier, Rect},
+    input::MouseEventKind,
     theme::Style,
     view::ViewPosition,
     Document, DocumentId, Editor,
@@ -274,6 +275,8 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     preview_scroll: usize,
     /// Height of the preview area (for page scrolling)
     preview_height: u16,
+    /// Screen area of the preview panel (for mouse scroll hit-testing)
+    preview_area: Rect,
     /// Last cursor position used to detect selection changes
     last_preview_cursor: u32,
 }
@@ -403,6 +406,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             dynamic_query_handler: None,
             preview_scroll: 0,
             preview_height: 0,
+            preview_area: Rect::default(),
             last_preview_cursor: u32::MAX,
         }
     }
@@ -906,6 +910,9 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         let inner = inner.inner(margin);
         BLOCK.render(area, surface);
 
+        // Track preview area for mouse scroll hit-testing
+        self.preview_area = area;
+
         // Reset preview scroll when selected item changes
         self.preview_height = inner.height;
         if self.cursor != self.last_preview_cursor {
@@ -1094,7 +1101,25 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             Event::Resize(..) => return EventResult::Consumed(None),
             // Picker is a modal and should consume mouse events so clicks don't fall
             // through to the editor underneath
-            Event::Mouse(_) => return EventResult::Consumed(None),
+            Event::Mouse(mouse) => {
+                let in_preview = self.file_fn.is_some()
+                    && mouse.row >= self.preview_area.y
+                    && mouse.row < self.preview_area.y + self.preview_area.height
+                    && mouse.column >= self.preview_area.x
+                    && mouse.column < self.preview_area.x + self.preview_area.width;
+                if in_preview {
+                    match mouse.kind {
+                        MouseEventKind::ScrollDown => {
+                            self.preview_scroll = self.preview_scroll.saturating_add(3);
+                        }
+                        MouseEventKind::ScrollUp => {
+                            self.preview_scroll = self.preview_scroll.saturating_sub(3);
+                        }
+                        _ => {}
+                    }
+                }
+                return EventResult::Consumed(None);
+            }
             _ => return EventResult::Ignored(None),
         };
 

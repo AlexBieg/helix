@@ -46,5 +46,6 @@ Custom features added on top of upstream Helix.
 - `Alt-PageUp` / `Alt-PageDown`: scroll preview one page
 - `Alt-Home`: reset scroll to top of preview
 - `Alt-End`: scroll to bottom of preview
+- Mouse wheel scrolling in the preview area (3 lines per tick)
 - Scroll position resets automatically when the selected item changes
 - Implemented in the generic `Picker` component via `preview_scroll` offset tracking
