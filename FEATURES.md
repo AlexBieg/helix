@@ -31,3 +31,11 @@ Custom features added on top of upstream Helix.
 - Deduplicates and caps at 100 entries
 - Accessible via `space R` or `:recent_file_picker`
 - Includes file preview panel on selection
+
+## 2025-06-10
+
+### File preview below file list in all pickers
+- Changed layout of the generic `Picker` component in `helix-term/src/ui/picker.rs`
+- Preview panel now renders below the file list instead of to the right (vertical split)
+- Affects all pickers: file picker, file explorer, buffer picker, symbol picker, global search, diagnostics picker, recent file picker, changed file picker, and DAP pickers
+- Added `MIN_AREA_HEIGHT_FOR_PREVIEW` constant (20 rows) to prevent showing preview when the area is too short
