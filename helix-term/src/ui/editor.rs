@@ -14,7 +14,7 @@ use crate::{
 };
 
 use helix_core::{
-    diagnostic::NumberOrString,
+    diagnostic::{NumberOrString, Severity},
     graphemes::{next_grapheme_boundary, prev_grapheme_boundary},
     movement::Direction,
     syntax::{self, OverlayHighlights},
@@ -237,10 +237,44 @@ impl EditorView {
             let scroll_line = (viewport_height - scroll_height) * current_scroll
                 / std::cmp::max(1, total_lines.saturating_sub(viewport_height));
             let x = inner.right().saturating_sub(1);
+            let dx = x.saturating_sub(1);
+
+            // Reset all cells in the scrollbar columns
             for i in 0..viewport_height {
-                let cell = &mut surface[(x, inner.top() + i as u16)];
-                cell.reset();
+                surface[(x, inner.top() + i as u16)].reset();
+                surface[(dx, inner.top() + i as u16)].reset();
+            }
+
+            // Draw diagnostic markers in the track area (one column left of thumb)
+            let diagnostics = doc.diagnostics();
+            if !diagnostics.is_empty() {
+                let error_fg = theme.get("error").fg;
+                let warning_fg = theme.get("warning").fg;
+                let info_fg = theme.get("info").fg;
+                let hint_fg = theme.get("hint").fg;
+
+                for d in diagnostics {
+                    let row = (d.line as usize * viewport_height) / total_lines;
+                    let row = row.min(viewport_height.saturating_sub(1));
+                    let cell = &mut surface[(dx, inner.top() + row as u16)];
+
+                    let color = match d.severity {
+                        Some(Severity::Error) => error_fg,
+                        Some(Severity::Warning) | None => warning_fg,
+                        Some(Severity::Info) => info_fg,
+                        Some(Severity::Hint) => hint_fg,
+                    }
+                    .unwrap_or(Color::Reset);
+
+                    cell.set_fg(color);
+                    cell.set_symbol("▂");
+                }
+            }
+
+            // Draw the scroll thumb on top
+            for i in 0..viewport_height {
                 if scroll_line <= i && i < scroll_line + scroll_height {
+                    let cell = &mut surface[(x, inner.top() + i as u16)];
                     cell.set_symbol("▐");
                     cell.set_fg(scroll_style.fg.unwrap_or(Color::Reset));
                     cell.set_bg(scroll_style.bg.unwrap_or(Color::Reset));
