@@ -758,6 +758,9 @@ impl Application {
                             .file_event_handler
                             .file_changed(path);
                     }
+                    // Request a redraw after the async diff computation finishes
+                    // so the gutter reflects the updated git diff.
+                    helix_event::request_redraw();
                 }
                 self.render().await;
             }
