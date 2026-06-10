@@ -5,6 +5,7 @@ use crate::{
         DocumentOpenError, DocumentSavedEventFuture, DocumentSavedEventResult, Mode, SavePoint,
     },
     events::{DocumentDidClose, DocumentDidOpen, DocumentFocusLost},
+    file_watcher::FileWatcher,
     graphics::{CursorKind, Rect},
     handlers::Handlers,
     info::Info,
@@ -434,6 +435,9 @@ pub struct Config {
     pub buffer_picker: BufferPickerConfig,
     /// Whether to implicitly trust every workspace or not
     pub insecure: bool,
+    /// Configuration for automatic file reloading on external changes.
+    #[serde(default)]
+    pub file_watcher: FileWatcherConfig,
 }
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, Clone, Copy)]
@@ -962,6 +966,33 @@ fn default_auto_save_delay() -> u64 {
     DEFAULT_AUTO_SAVE_DELAY
 }
 
+const DEFAULT_FILE_WATCHER_DEBOUNCE_MS: u64 = 100;
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct FileWatcherConfig {
+    /// Automatically reload buffers when files are modified externally.
+    /// Defaults to `true`.
+    pub auto_reload: bool,
+    /// Duration in milliseconds to debounce file change events before
+    /// reloading. Defaults to 100.
+    #[serde(default = "default_file_watcher_debounce")]
+    pub debounce_ms: u64,
+}
+
+fn default_file_watcher_debounce() -> u64 {
+    DEFAULT_FILE_WATCHER_DEBOUNCE_MS
+}
+
+impl Default for FileWatcherConfig {
+    fn default() -> Self {
+        Self {
+            auto_reload: true,
+            debounce_ms: DEFAULT_FILE_WATCHER_DEBOUNCE_MS,
+        }
+    }
+}
+
 fn deserialize_auto_save<'de, D>(deserializer: D) -> Result<AutoSave, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -1157,6 +1188,7 @@ impl Default for Config {
             kitty_keyboard_protocol: Default::default(),
             buffer_picker: BufferPickerConfig::default(),
             insecure: false,
+            file_watcher: FileWatcherConfig::default(),
         }
     }
 }
@@ -1259,6 +1291,9 @@ pub struct Editor {
 
     pub mouse_down_range: Option<Range>,
     pub cursor_cache: CursorCache,
+
+    pub file_watcher: FileWatcher,
+    pub file_watcher_rx: UnboundedReceiver<PathBuf>,
 }
 
 pub type Motion = Box<dyn Fn(&mut Editor)>;
@@ -1269,6 +1304,7 @@ pub enum EditorEvent {
     ConfigEvent(ConfigEvent),
     LanguageServerMessage((LanguageServerId, Call)),
     DebuggerEvent((DebugAdapterId, dap::Payload)),
+    FileChanged(DocumentId),
     IdleTimer,
     Redraw,
 }
@@ -1336,6 +1372,7 @@ impl Editor {
         let language_servers = helix_lsp::Registry::new(syn_loader.clone());
         let conf = config.load();
         let auto_pairs = (&conf.auto_pairs).into();
+        let (file_watcher, file_watcher_rx) = FileWatcher::new();
 
         // HAXX: offset the render area height by 1 to account for prompt/commandline
         area.height -= 1;
@@ -1382,6 +1419,8 @@ impl Editor {
             mouse_down_range: None,
             cursor_cache: CursorCache::default(),
             dir_stack: VecDeque::with_capacity(DIR_STACK_CAP),
+            file_watcher,
+            file_watcher_rx,
         }
     }
 
@@ -2043,6 +2082,11 @@ impl Editor {
             let id = self.new_document(doc);
             self.launch_language_servers(id);
 
+            // Start watching this file for external changes
+            if let Err(e) = self.file_watcher.watch(&path) {
+                log::debug!("file watcher could not watch {:?}: {:?}", path, e);
+            }
+
             helix_event::dispatch(DocumentDidOpen {
                 editor: self,
                 doc: id,
@@ -2114,6 +2158,13 @@ impl Editor {
         }
 
         let doc = self.documents.remove(&doc_id).unwrap();
+
+        // Stop watching this file for external changes
+        if let Some(path) = doc.path() {
+            if let Err(e) = self.file_watcher.unwatch(path) {
+                log::warn!("failed to stop watching file {:?}: {:?}", path, e);
+            }
+        }
 
         // If the document we removed was visible in all views, we will have no more views. We don't
         // want to close the editor just for a simple buffer close, so we need to create a new view
@@ -2393,6 +2444,12 @@ impl Editor {
                     return EditorEvent::DebuggerEvent(event)
                 }
 
+                Some(path) = self.file_watcher_rx.recv() => {
+                    if let Some(doc_id) = self.document_id_by_path(&path) {
+                        return EditorEvent::FileChanged(doc_id)
+                    }
+                }
+
                 _ = helix_event::redraw_requested() => {
                     if  !self.needs_redraw{
                         self.needs_redraw = true;
@@ -2602,5 +2659,48 @@ impl CursorCache {
 
     pub fn reset(&self) {
         self.0.set(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_file_watcher_config_default() {
+        let config = FileWatcherConfig::default();
+        assert!(config.auto_reload);
+        assert_eq!(config.debounce_ms, 100);
+    }
+
+    #[test]
+    fn test_file_watcher_config_deserialize() {
+        let toml = r#"
+[file-watcher]
+auto-reload = false
+debounce-ms = 250
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(!config.file_watcher.auto_reload);
+        assert_eq!(config.file_watcher.debounce_ms, 250);
+    }
+
+    #[test]
+    fn test_file_watcher_config_partial_deserialize() {
+        let toml = r#"
+[file-watcher]
+auto-reload = false
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(!config.file_watcher.auto_reload);
+        assert_eq!(config.file_watcher.debounce_ms, 100); // default
+    }
+
+    #[test]
+    fn test_file_watcher_config_missing() {
+        let toml = "";
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(config.file_watcher.auto_reload);
+        assert_eq!(config.file_watcher.debounce_ms, 100);
     }
 }

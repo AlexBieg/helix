@@ -31,9 +31,11 @@ use crate::{
 
 use log::{debug, error, info, warn};
 use std::{
+    collections::HashMap,
     io::{stdin, IsTerminal},
     path::Path,
     sync::Arc,
+    time::Instant,
 };
 
 #[cfg_attr(windows, allow(unused_imports))]
@@ -79,6 +81,8 @@ pub struct Application {
     lsp_progress: LspProgressMap,
 
     theme_mode: Option<theme::Mode>,
+    /// Track last file change event time per document for debouncing
+    last_file_change: HashMap<helix_view::DocumentId, Instant>,
 }
 
 #[cfg(feature = "integration")]
@@ -247,6 +251,7 @@ impl Application {
             jobs,
             lsp_progress: LspProgressMap::new(),
             theme_mode,
+            last_file_change: HashMap::new(),
         };
 
         Ok(app)
@@ -676,6 +681,85 @@ impl Application {
                 {
                     return true;
                 }
+            }
+            EditorEvent::FileChanged(doc_id) => {
+                let config = self.config.load();
+                let file_watcher_config = config.editor.file_watcher.clone();
+
+                if !file_watcher_config.auto_reload {
+                    return false;
+                }
+
+                // Debounce: skip if we recently processed a change for this document
+                let debounce = std::time::Duration::from_millis(file_watcher_config.debounce_ms);
+                let now = Instant::now();
+                if let Some(&last) = self.last_file_change.get(&doc_id) {
+                    if now.duration_since(last) < debounce {
+                        return false;
+                    }
+                }
+                self.last_file_change.insert(doc_id, now);
+
+                // Check if the document is modified (has unsaved changes)
+                let is_modified = self
+                    .editor
+                    .documents
+                    .get(&doc_id)
+                    .is_some_and(|doc| doc.is_modified());
+
+                if is_modified {
+                    self.editor
+                        .set_status("File changed externally but buffer has unsaved changes. Use :reload to force update.");
+                    helix_event::request_redraw();
+                    return false;
+                }
+
+                // Reload the document: find a view for this doc_id
+                let scrolloff = self.editor.config().scrolloff;
+                let view_id = match self
+                    .editor
+                    .tree
+                    .views()
+                    .find(|(v, _)| v.doc == doc_id)
+                    .map(|(v, _)| v.id)
+                {
+                    Some(id) => id,
+                    None => {
+                        // No view is showing this document; skip reload
+                        return false;
+                    }
+                };
+
+                let path_for_lsp;
+                let reload_result;
+                {
+                    let doc = match self.editor.documents.get_mut(&doc_id) {
+                        Some(d) => d,
+                        None => return false,
+                    };
+                    let view = self.editor.tree.get_mut(view_id);
+                    reload_result = doc.reload(view, &self.editor.diff_providers);
+                    if reload_result.is_ok() {
+                        view.ensure_cursor_in_view(doc, scrolloff);
+                    }
+                    path_for_lsp = doc.path().map(ToOwned::to_owned);
+                }
+
+                if let Err(e) = reload_result {
+                    self.editor
+                        .set_error(format!("Failed to reload file: {}", e));
+                } else {
+                    self.editor
+                        .set_status("File changed externally, reloaded.");
+                    // Notify LSP
+                    if let Some(path) = path_for_lsp {
+                        self.editor
+                            .language_servers
+                            .file_event_handler
+                            .file_changed(path);
+                    }
+                }
+                self.render().await;
             }
         }
 
