@@ -1532,6 +1532,7 @@ dependencies = [
  "crossterm",
  "dashmap",
  "futures-util",
+ "globset",
  "grep-matcher",
  "grep-regex",
  "grep-searcher",

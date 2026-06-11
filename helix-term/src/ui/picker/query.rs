@@ -43,6 +43,10 @@ impl PickerQuery {
         self.inner.get(column)
     }
 
+    pub(super) fn all(&self) -> &HashMap<Arc<str>, Arc<str>> {
+        &self.inner
+    }
+
     pub(super) fn parse(&mut self, input: &str) -> HashMap<Arc<str>, Arc<str>> {
         let mut fields: HashMap<Arc<str>, String> = HashMap::new();
         let primary_field = &self.column_names[self.primary_column];

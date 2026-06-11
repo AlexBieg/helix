@@ -2612,13 +2612,32 @@ fn global_search(cx: &mut Context) {
                 .stylize(Some(&item.path), Some(item.line_start))
         }),
         PickerColumn::hidden("contents"),
+        PickerColumn::hidden("glob"),
     ];
 
     let get_files = |query: &str,
+                     columns: &HashMap<std::sync::Arc<str>, std::sync::Arc<str>>,
                      editor: &mut Editor,
                      config: std::sync::Arc<GlobalSearchConfig>,
                      injector: &ui::picker::Injector<_, _>| {
-        if query.is_empty() {
+        let glob_raw = columns.get("glob").map(|s| s.trim()).filter(|s| !s.is_empty());
+        let (glob_pattern, fallback_query) = match glob_raw {
+            Some(raw) => {
+                let mut parts = raw.split_whitespace();
+                let glob = parts.next().unwrap_or("");
+                let rest: Vec<&str> = parts.collect();
+                (Some(glob.to_string()), if rest.is_empty() { None } else { Some(rest.join(" ")) })
+            }
+            None => (None, None),
+        };
+
+        let effective_query = if query.is_empty() {
+            fallback_query.as_deref().unwrap_or("").to_owned()
+        } else {
+            query.to_owned()
+        };
+
+        if effective_query.is_empty() {
             return async { Ok(()) }.boxed();
         }
 
@@ -2636,7 +2655,7 @@ fn global_search(cx: &mut Context) {
         let matcher = match RegexMatcherBuilder::new()
             .case_smart(config.smart_case)
             .multi_line(true)
-            .build(query)
+            .build(&effective_query)
         {
             Ok(matcher) => {
                 // Clear any "Failed to compile regex" errors out of the statusline.
@@ -2654,7 +2673,28 @@ fn global_search(cx: &mut Context) {
             .canonicalize()
             .unwrap_or_else(|_| search_root.clone());
 
+        let glob_set = glob_pattern
+            .as_deref()
+            .and_then(|pattern| {
+                let mut builder = globset::GlobSetBuilder::new();
+                for pat in pattern.split_whitespace() {
+                    match globset::Glob::new(pat) {
+                        Ok(glob) => {
+                            builder.add(glob);
+                        }
+                        Err(err) => {
+                            log::info!("Invalid glob pattern '{}': {}", pat, err);
+                        }
+                    }
+                }
+                match builder.build() {
+                    Ok(set) if !set.is_empty() => Some(set),
+                    _ => None,
+                }
+            });
+
         let injector = injector.clone();
+        let search_root_for_glob = search_root.clone();
         async move {
             let searcher = SearcherBuilder::new()
                 .binary_detection(BinaryDetection::quit(b'\x00'))
@@ -2670,7 +2710,31 @@ fn global_search(cx: &mut Context) {
                 .git_exclude(config.file_picker_config.git_exclude)
                 .max_depth(config.file_picker_config.max_depth)
                 .filter_entry(move |entry| {
-                    filter_picker_entry(entry, &absolute_root, dedup_symlinks)
+                    if !filter_picker_entry(entry, &absolute_root, dedup_symlinks) {
+                        return false;
+                    }
+                    if let Some(ref glob_set) = glob_set {
+                        let is_dir = entry
+                            .file_type()
+                            .map(|ft| ft.is_dir())
+                            .unwrap_or(false);
+                        if !is_dir {
+                            let path = entry.path();
+                            let is_match = glob_set
+                                .is_match(path)
+                                || path
+                                    .strip_prefix(&search_root_for_glob)
+                                    .map(|rel| glob_set.is_match(rel))
+                                    .unwrap_or(false)
+                                || path
+                                    .file_name()
+                                    .is_some_and(|name| glob_set.is_match(name));
+                            if !is_match {
+                                return false;
+                            }
+                        }
+                    }
+                    true
                 })
                 .add_custom_ignore_filename(helix_loader::config_dir().join("ignore"))
                 .add_custom_ignore_filename(".helix/ignore")

@@ -40,6 +40,3 @@ Save and restore editor state across restarts.
 
 ## File diffing
 
-## Merge conflict resolution
-
-

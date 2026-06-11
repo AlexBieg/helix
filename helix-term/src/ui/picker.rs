@@ -240,8 +240,13 @@ impl<T, D> Column<T, D> {
 
 /// Returns a new list of options to replace the contents of the picker
 /// when called with the current picker query,
-type DynQueryCallback<T, D> =
-    fn(&str, &mut Editor, Arc<D>, &Injector<T, D>) -> BoxFuture<'static, anyhow::Result<()>>;
+type DynQueryCallback<T, D> = fn(
+    &str,
+    &HashMap<Arc<str>, Arc<str>>,
+    &mut Editor,
+    Arc<D>,
+    &Injector<T, D>,
+) -> BoxFuture<'static, anyhow::Result<()>>;
 
 pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     columns: Arc<[Column<T, D>]>,
@@ -471,6 +476,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         let handler = DynamicQueryHandler::new(callback, debounce_ms).spawn();
         let event = DynamicQueryChange {
             query: self.primary_query(),
+            columns: self.query.all().clone(),
             // Treat the initial query as a paste.
             is_paste: true,
         };
@@ -603,6 +609,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         if let Some(handler) = &self.dynamic_query_handler {
             let event = DynamicQueryChange {
                 query: self.primary_query(),
+                columns: self.query.all().clone(),
                 is_paste,
             };
             helix_event::send_blocking(handler, event);

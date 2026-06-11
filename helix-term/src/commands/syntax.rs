@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     iter,
     path::{Path, PathBuf},
     sync::Arc,
@@ -301,6 +301,7 @@ pub fn syntax_workspace_symbol_picker(cx: &mut Context) {
     ];
 
     let get_tags = |query: &str,
+                    _columns: &HashMap<Arc<str>, Arc<str>>,
                     editor: &mut Editor,
                     state: Arc<SearchState>,
                     injector: &Injector<_, _>| {
