@@ -167,32 +167,39 @@ features and the test harness's idle detection still work. (Phase 2's animation
 will additionally request per-frame redraws, but only while a toast is actually
 sliding/fading.)
 
-## Animation (subtle slide + fade)
+## Animation (subtle slide + fade) — ✅ Phase 2 implemented
 
-Driven entirely by `helix_event::request_redraw()`, which schedules the next
-frame ~33ms out (`helix-view/src/editor.rs:2510-2518`) — the same mechanism LSP
-spinners ride on. No new timer is added.
+While any toast is mid-animation the render pass calls
+`helix_event::request_redraw()` (~30 FPS, the mechanism LSP spinners ride on);
+when nothing is animating it falls back to the single scheduled wake-up above.
+So redraws only spin while a toast is actually sliding or fading — the editor is
+otherwise idle.
 
-At the end of `NotificationsView::render`, if any notification is animating or
-counting down, call `helix_event::request_redraw()` to schedule the next frame.
-When the stack empties, requesting stops and the editor returns to fully idle (no
-busy-loop).
+All animation is derived purely from `created_at` / `expires_at` and `now`
+(unit-tested via injected instants):
 
-Per notification, derived purely from elapsed time:
+- **Slide-in** (first 150ms of `created_at`): the box eases horizontally into
+  its resting position, `ease_out_cubic(clamp01((now - created_at) / 150ms))`.
+- **Fade-out** (the `FADE` = 150ms window before `expires_at`): the box slides
+  back out and is rendered with `Modifier::DIM`. Dismissing (key/click) brings
+  `expires_at` forward to `now + FADE` so it animates out instead of vanishing;
+  `Duration::ZERO` (animation disabled) removes on the next prune.
 
-- **Slide-in** (first ~150ms of `created_at`): the box eases horizontally from
-  `viewport.width` (off-screen right) to its resting x.
-  `progress = clamp01((now - created_at) / 150ms)`, ease-out cubic.
-- **Fade-out** (last ~150ms before `expires_at`, or once dismissed): approximate
-  opacity in a terminal by stepping the style toward the background —
-  `Modifier::DIM` for the cheap version, or blend fg→bg in 3–4 steps for a
-  smoother feel.
-- Boxes below an exiting one ease upward to fill the gap (same 150ms easing on
-  their target y).
+**Implementation choices / deviations:**
 
-Graceful degradation: when `editor.notifications.animate = false` (or a known-slow
-terminal), boxes appear/disappear instantly — the same code with easing clamped
-to 0/1.
+- The slide is a short on-screen horizontal glide (`SLIDE_DISTANCE` = 6 cols,
+  clamped to stay on-screen) rather than emerging from off the right edge. A
+  true off-edge slide would require rendering a rect past the buffer bounds,
+  which `clear_with`/`Block` don't clip — they panic — so it would mean a manual
+  per-cell renderer. Deferred as future polish.
+- **Reflow:** auto-dismiss removes the *oldest* toast, which sits at the bottom
+  of the stack, so nothing below it moves — no reflow needed in the common case.
+  Dismissing a mid-stack toast lets the ones below snap up once it's pruned (it
+  has already faded to invisible by then). Smooth vertical tweening is skipped:
+  terminal rows are discrete, so it reads as jank more than polish.
+
+Graceful degradation: `editor.notifications.animate = false` skips slide/fade
+entirely — toasts appear and disappear instantly.
 
 ## Config (helix-view editor config)
 
@@ -313,7 +320,9 @@ Manual checklist:
    `:notify` command for manual testing. Ships with `Notifications` + layout
    unit tests and the integration tests above. Default theme registers
    `ui.notification`; other themes fall back to `ui.popup` + severity scopes.
-2. **Animation:** slide-in + fade-out + reflow via timestamps and
-   `request_redraw`, with layout/easing unit tests.
+2. **Animation:** ✅ **Implemented.** Slide-in + fade-out via timestamps, with
+   per-frame redraw only while animating (single scheduled wake otherwise).
+   Dismissal fades out. Easing/animation predicates are unit-tested. Reflow is a
+   snap (see Animation notes); off-edge slide deferred.
 3. **Polish:** `+N more` overflow, coalescing counter, theme scopes + docs
    (`book/src/`), default-theme entries.

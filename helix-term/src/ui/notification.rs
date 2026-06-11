@@ -1,7 +1,9 @@
+use std::time::{Duration, Instant};
+
 use helix_core::unicode::width::{UnicodeWidthChar, UnicodeWidthStr};
 use helix_view::editor::Severity;
 use helix_view::graphics::{Modifier, Rect, Style};
-use helix_view::notification::Notifications;
+use helix_view::notification::{Notifications, FADE};
 use helix_view::Theme;
 use tui::buffer::Buffer as Surface;
 use tui::widgets::{Block, Widget};
@@ -23,12 +25,19 @@ const PAD: u16 = 1;
 /// Rows reserved at the bottom for the statusline (+ optional status message).
 const BOTTOM_RESERVED: u16 = 2;
 
+/// How long a toast takes to slide into its resting position.
+const SLIDE: Duration = Duration::from_millis(150);
+/// How far (in columns) a toast slides horizontally as it enters/leaves.
+const SLIDE_DISTANCE: u16 = 6;
+
 struct Toast {
     id: u32,
     rect: Rect,
     severity: Severity,
     title: String,
     lines: Vec<String>,
+    created_at: Instant,
+    expires_at: Option<Instant>,
 }
 
 /// Render the notification stack on top of everything else. Called as a final
@@ -38,6 +47,7 @@ pub fn render(viewport: Rect, surface: &mut Surface, cx: &mut Context) {
 
     let config = cx.editor.config();
     let enabled = config.notifications.enable;
+    let animate = config.notifications.animate;
     let max_visible = config.notifications.max_visible.max(1);
     let use_bufferline = match config.bufferline {
         helix_view::editor::BufferLine::Always => true,
@@ -51,29 +61,45 @@ pub fn render(viewport: Rect, surface: &mut Surface, cx: &mut Context) {
         return;
     }
 
+    let now = std::time::Instant::now();
+
     // Leave a one-row gap below the bufferline (when shown) or the top edge.
     let top_offset = u16::from(use_bufferline) + TOP_MARGIN;
     let (toasts, overflow) = layout(viewport, top_offset, &cx.editor.notifications, max_visible);
-    cx.editor
-        .notifications
-        .set_last_rects(toasts.iter().map(|toast| (toast.id, toast.rect)).collect());
 
     let theme = &cx.editor.theme;
-    let background = theme
+    let base_background = theme
         .try_get_exact("ui.notification")
         .unwrap_or_else(|| theme.get("ui.popup"));
-    let text_style = theme
+    let base_text = theme
         .try_get_exact("ui.notification.text")
         .unwrap_or_else(|| theme.get("ui.text"));
 
+    let mut drawn_rects = Vec::with_capacity(toasts.len());
+    let mut any_animating = false;
     let mut next_y = viewport.y;
     for toast in &toasts {
-        let area = toast.rect;
-        surface.clear_with(area, background);
+        // Slide horizontally as the toast enters and leaves; dim while leaving.
+        let (shift, dim) = if animate {
+            any_animating |= is_animating(toast.created_at, toast.expires_at, now);
+            (
+                slide_shift(toast.created_at, toast.expires_at, now, SLIDE_DISTANCE)
+                    .min(toast.rect.x.saturating_sub(viewport.x)),
+                fade_progress(toast.expires_at, now) > 0.0,
+            )
+        } else {
+            (0, false)
+        };
 
-        let block = Block::bordered()
-            .title(toast.title.as_str())
-            .border_style(accent_style(theme, toast.severity));
+        let area = Rect::new(toast.rect.x - shift, toast.rect.y, toast.rect.width, toast.rect.height);
+        drawn_rects.push((toast.id, area));
+
+        let background = dimmed(base_background, dim);
+        let text_style = dimmed(base_text, dim);
+        let accent = dimmed(accent_style(theme, toast.severity), dim);
+
+        surface.clear_with(area, background);
+        let block = Block::bordered().title(toast.title.as_str()).border_style(accent);
         let inner = block.inner(area);
         block.render(area, surface);
 
@@ -89,14 +115,89 @@ pub fn render(viewport: Rect, surface: &mut Surface, cx: &mut Context) {
         let label = format!("+{overflow} more");
         let width = label.width() as u16;
         let x = viewport.right().saturating_sub(width + RIGHT_MARGIN);
-        let style = text_style.add_modifier(Modifier::DIM);
+        let style = base_text.add_modifier(Modifier::DIM);
         surface.set_string(x, next_y, &label, style);
     }
 
-    // Schedule a single wake-up at the soonest auto-dismiss deadline so toasts
-    // disappear on time without busy-polling. A sticky-only stack needs none.
-    if let Some(deadline) = cx.editor.notifications.next_expiry() {
+    cx.editor.notifications.set_last_rects(drawn_rects);
+
+    if animate && any_animating {
+        // While a toast is sliding/fading, keep frames coming (~30 FPS).
+        helix_event::request_redraw();
+    } else if let Some(deadline) = next_redraw(&cx.editor.notifications, animate) {
+        // Otherwise wake once at the next visual change (fade start or removal).
         cx.editor.request_redraw_at(deadline);
+    }
+}
+
+/// The next instant at which a toast's appearance changes — the start of its
+/// fade-out when animating, or its removal otherwise. Drives a single scheduled
+/// wake-up so static stacks don't busy-poll.
+fn next_redraw(notifications: &Notifications, animate: bool) -> Option<Instant> {
+    notifications
+        .iter()
+        .filter_map(|n| {
+            n.expires_at.map(|expires_at| {
+                if animate {
+                    expires_at.checked_sub(FADE).unwrap_or(expires_at)
+                } else {
+                    expires_at
+                }
+            })
+        })
+        .min()
+}
+
+fn clamp01(value: f32) -> f32 {
+    value.clamp(0.0, 1.0)
+}
+
+fn ease_out_cubic(t: f32) -> f32 {
+    1.0 - (1.0 - t).powi(3)
+}
+
+fn ease_in_cubic(t: f32) -> f32 {
+    t * t * t
+}
+
+/// Slide-in completion in `[0, 1]`.
+fn slide_in_progress(created_at: Instant, now: Instant) -> f32 {
+    clamp01(now.saturating_duration_since(created_at).as_secs_f32() / SLIDE.as_secs_f32())
+}
+
+/// Fade-out progress in `[0, 1]`: `0` until the fade window starts, `1` at removal.
+fn fade_progress(expires_at: Option<Instant>, now: Instant) -> f32 {
+    match expires_at {
+        Some(expires_at) => {
+            let start = expires_at.checked_sub(FADE).unwrap_or(expires_at);
+            if now <= start {
+                0.0
+            } else {
+                clamp01(now.saturating_duration_since(start).as_secs_f32() / FADE.as_secs_f32())
+            }
+        }
+        None => 0.0,
+    }
+}
+
+/// Whether a toast is mid-animation (sliding in or fading out) at `now`.
+fn is_animating(created_at: Instant, expires_at: Option<Instant>, now: Instant) -> bool {
+    slide_in_progress(created_at, now) < 1.0 || fade_progress(expires_at, now) > 0.0
+}
+
+/// Columns to shift a toast left of its resting position for the slide effect.
+fn slide_shift(created_at: Instant, expires_at: Option<Instant>, now: Instant, distance: u16) -> u16 {
+    let distance = distance as f32;
+    let entering = (1.0 - ease_out_cubic(slide_in_progress(created_at, now))) * distance;
+    let leaving = ease_in_cubic(fade_progress(expires_at, now)) * distance;
+    entering.max(leaving).round() as u16
+}
+
+fn dimmed(style: Style, dim: bool) -> Style {
+    if dim {
+        style.add_modifier(Modifier::DIM)
+    } else {
+        style
     }
 }
 
@@ -163,6 +264,8 @@ fn layout(
             severity: notification.severity,
             title: title(notification),
             lines,
+            created_at: notification.created_at,
+            expires_at: notification.expires_at,
         });
         y += box_height + GAP;
     }
@@ -335,6 +438,52 @@ mod tests {
         let (toasts, overflow) = layout(viewport, TOP_MARGIN, &n, 5);
         assert!(toasts.is_empty());
         assert_eq!(overflow, 1);
+    }
+
+    #[test]
+    fn slide_shift_eases_in_and_settles() {
+        let now = Instant::now();
+        // At creation, fully shifted left by the slide distance.
+        assert_eq!(slide_shift(now, None, now, SLIDE_DISTANCE), SLIDE_DISTANCE);
+        // Once the slide completes, resting with no shift.
+        assert_eq!(slide_shift(now, None, now + SLIDE, SLIDE_DISTANCE), 0);
+    }
+
+    #[test]
+    fn fade_progress_only_inside_window() {
+        let now = Instant::now();
+        let expires = now + Duration::from_secs(1);
+        assert_eq!(fade_progress(Some(expires), now), 0.0); // before the window
+        assert!(fade_progress(Some(expires), expires - FADE / 2) > 0.0); // inside
+        assert_eq!(fade_progress(None, now), 0.0); // sticky never fades
+    }
+
+    #[test]
+    fn slide_shift_full_at_end_of_fade() {
+        let now = Instant::now();
+        let expires = now + Duration::from_secs(10);
+        // Settled, then fully faded out at expiry → shifted out by the full distance.
+        assert_eq!(
+            slide_shift(now, Some(expires), expires, SLIDE_DISTANCE),
+            SLIDE_DISTANCE
+        );
+    }
+
+    #[test]
+    fn is_animating_during_slide_and_fade_only() {
+        let now = Instant::now();
+        let expires = now + Duration::from_secs(10);
+        assert!(is_animating(now, Some(expires), now)); // sliding in
+        assert!(!is_animating(now, Some(expires), now + SLIDE)); // settled, counting down
+        assert!(is_animating(now, Some(expires), expires - FADE / 2)); // fading out
+    }
+
+    #[test]
+    fn next_redraw_targets_fade_start_or_expiry() {
+        let n = notifications(&[("a", Severity::Info)]);
+        let expires = n.iter().next().unwrap().expires_at.unwrap();
+        assert_eq!(next_redraw(&n, true), Some(expires - FADE));
+        assert_eq!(next_redraw(&n, false), Some(expires));
     }
 
     #[test]

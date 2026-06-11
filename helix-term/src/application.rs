@@ -866,7 +866,7 @@ impl Application {
                     Event::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
                 ) && {
                     let Event::Mouse(mouse) = &event else { unreachable!() };
-                    cx.editor.notifications.dismiss_at(mouse.column, mouse.row)
+                    cx.editor.dismiss_notification_at(mouse.column, mouse.row)
                 };
                 dismissed || self.compositor.handle_event(&event, &mut cx)
             }

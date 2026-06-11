@@ -12,6 +12,11 @@ use helix_core::diagnostic::Severity;
 
 use crate::graphics::Rect;
 
+/// How long a notification takes to fade out. Dismissing brings a notification's
+/// removal deadline forward by this much so it animates out rather than
+/// vanishing; auto-dismiss reserves this window at the end of its lifetime.
+pub const FADE: Duration = Duration::from_millis(150);
+
 #[derive(Debug, Clone)]
 pub struct Notification {
     pub id: u32,
@@ -28,6 +33,17 @@ pub struct Notification {
 impl Notification {
     fn is_expired(&self, now: Instant) -> bool {
         self.expires_at.is_some_and(|expires_at| now >= expires_at)
+    }
+
+    /// Bring the removal deadline forward to `now + fade` (used when dismissing)
+    /// so the notification fades out. Never pushes an existing, sooner deadline
+    /// later.
+    fn begin_fade(&mut self, now: Instant, fade: Duration) {
+        let deadline = now + fade;
+        self.expires_at = Some(match self.expires_at {
+            Some(existing) => existing.min(deadline),
+            None => deadline,
+        });
     }
 }
 
@@ -79,26 +95,40 @@ impl Notifications {
         self.items.retain(|notification| !notification.is_expired(now));
     }
 
-    /// Dismiss a single notification by id. Returns whether one was removed.
-    pub fn dismiss(&mut self, id: u32) -> bool {
-        let len = self.items.len();
-        self.items.retain(|notification| notification.id != id);
-        self.items.len() != len
+    /// Begin dismissing a single notification by id, fading it out over `fade`
+    /// (use `Duration::ZERO` for an immediate removal on the next prune). Returns
+    /// whether a matching notification was found.
+    pub fn dismiss(&mut self, id: u32, now: Instant, fade: Duration) -> bool {
+        match self.items.iter_mut().find(|notification| notification.id == id) {
+            Some(notification) => {
+                notification.begin_fade(now, fade);
+                true
+            }
+            None => false,
+        }
     }
 
-    /// Dismiss the most recently shown notification.
-    pub fn dismiss_top(&mut self) -> bool {
-        self.items.pop().is_some()
+    /// Begin dismissing the most recently shown notification.
+    pub fn dismiss_top(&mut self, now: Instant, fade: Duration) -> bool {
+        match self.items.last_mut() {
+            Some(notification) => {
+                notification.begin_fade(now, fade);
+                true
+            }
+            None => false,
+        }
     }
 
-    /// Dismiss every notification.
-    pub fn dismiss_all(&mut self) {
-        self.items.clear();
+    /// Begin dismissing every notification.
+    pub fn dismiss_all(&mut self, now: Instant, fade: Duration) {
+        for notification in &mut self.items {
+            notification.begin_fade(now, fade);
+        }
     }
 
-    /// Dismiss the topmost notification whose last-rendered rectangle contains
-    /// the given screen cell. Returns whether one was removed.
-    pub fn dismiss_at(&mut self, column: u16, row: u16) -> bool {
+    /// Begin dismissing the topmost notification whose last-rendered rectangle
+    /// contains the given screen cell. Returns whether one was hit.
+    pub fn dismiss_at(&mut self, column: u16, row: u16, now: Instant, fade: Duration) -> bool {
         let hit = self.last_rects.iter().find_map(|(id, rect)| {
             let within = column >= rect.x
                 && column < rect.right()
@@ -107,7 +137,7 @@ impl Notifications {
             within.then_some(*id)
         });
         match hit {
-            Some(id) => self.dismiss(id),
+            Some(id) => self.dismiss(id, now, fade),
             None => false,
         }
     }
@@ -123,25 +153,6 @@ impl Notifications {
     /// Notifications in stacking order, newest first.
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Notification> {
         self.items.iter().rev()
-    }
-
-    /// Whether any notification is still counting down toward auto-dismiss. While
-    /// true the renderer keeps scheduling frames so toasts disappear on time;
-    /// sticky-only stacks need no further redraws.
-    pub fn wants_redraw(&self) -> bool {
-        self.items
-            .iter()
-            .any(|notification| notification.expires_at.is_some())
-    }
-
-    /// The soonest auto-dismiss deadline across all notifications, if any. The
-    /// renderer schedules a single wake-up at this instant so toasts disappear
-    /// on time without continuous polling.
-    pub fn next_expiry(&self) -> Option<Instant> {
-        self.items
-            .iter()
-            .filter_map(|notification| notification.expires_at)
-            .min()
     }
 
     /// Record the rectangles the toasts were rendered into, for mouse hit-testing.
@@ -182,7 +193,6 @@ mod tests {
         // Far in the future, a sticky notification is still present.
         n.prune(now + 3600 * SECOND);
         assert_eq!(n.len(), 1);
-        assert!(n.wants_redraw() == false);
     }
 
     #[test]
@@ -237,22 +247,51 @@ mod tests {
     }
 
     #[test]
-    fn dismiss_variants() {
+    fn dismiss_variants_remove_after_prune() {
         let now = Instant::now();
         let mut n = Notifications::default();
         let a = n.push(text("a"), Severity::Info, Some(SECOND), now);
         n.push(text("b"), Severity::Info, Some(SECOND), now);
         n.push(text("c"), Severity::Info, Some(SECOND), now);
 
-        assert!(n.dismiss(a));
-        assert!(!n.dismiss(a));
+        // Zero fade dismisses immediately on the next prune.
+        assert!(n.dismiss(a, now, Duration::ZERO));
+        assert!(!n.dismiss(999, now, Duration::ZERO));
+        n.prune(now);
         assert_eq!(n.len(), 2);
 
-        assert!(n.dismiss_top());
+        assert!(n.dismiss_top(now, Duration::ZERO));
+        n.prune(now);
         assert_eq!(n.iter().map(|i| i.text.as_ref()).collect::<Vec<_>>(), vec!["b"]);
 
-        n.dismiss_all();
+        n.dismiss_all(now, Duration::ZERO);
+        n.prune(now);
         assert!(n.is_empty());
+    }
+
+    #[test]
+    fn dismiss_with_fade_delays_removal() {
+        let now = Instant::now();
+        let mut n = Notifications::default();
+        // Sticky notification gets a removal deadline when dismissed.
+        let id = n.push(text("boom"), Severity::Error, None, now);
+        assert!(n.dismiss(id, now, FADE));
+
+        assert_eq!(n.iter().next().unwrap().expires_at, Some(now + FADE));
+        n.prune(now); // still fading out
+        assert_eq!(n.len(), 1);
+        n.prune(now + FADE);
+        assert!(n.is_empty());
+    }
+
+    #[test]
+    fn dismiss_never_extends_a_sooner_deadline() {
+        let now = Instant::now();
+        let mut n = Notifications::default();
+        let id = n.push(text("soon"), Severity::Info, Some(SECOND / 2), now);
+        // A longer fade must not push the existing, sooner deadline later.
+        n.dismiss(id, now, SECOND);
+        assert_eq!(n.iter().next().unwrap().expires_at, Some(now + SECOND / 2));
     }
 
     #[test]
@@ -262,9 +301,10 @@ mod tests {
         let id = n.push(text("click me"), Severity::Info, Some(SECOND), now);
         n.set_last_rects(vec![(id, Rect::new(10, 1, 20, 4))]);
 
-        assert!(!n.dismiss_at(5, 1)); // left of the box
-        assert!(!n.dismiss_at(15, 6)); // below the box
-        assert!(n.dismiss_at(15, 2)); // inside
+        assert!(!n.dismiss_at(5, 1, now, Duration::ZERO)); // left of the box
+        assert!(!n.dismiss_at(15, 6, now, Duration::ZERO)); // below the box
+        assert!(n.dismiss_at(15, 2, now, Duration::ZERO)); // inside
+        n.prune(now);
         assert!(n.is_empty());
     }
 }

@@ -736,11 +736,11 @@ impl PartialEq for MappableCommand {
 fn no_op(_cx: &mut Context) {}
 
 fn dismiss_notifications(cx: &mut Context) {
-    cx.editor.notifications.dismiss_all();
+    cx.editor.dismiss_notifications();
 }
 
 fn dismiss_notification(cx: &mut Context) {
-    cx.editor.notifications.dismiss_top();
+    cx.editor.dismiss_notification();
 }
 
 type MoveFn =

@@ -1599,6 +1599,44 @@ impl Editor {
         helix_event::request_redraw();
     }
 
+    /// Fade-out duration for dismissals, or zero when animation is disabled.
+    fn notification_fade(&self) -> Duration {
+        if self.config().notifications.animate {
+            crate::notification::FADE
+        } else {
+            Duration::ZERO
+        }
+    }
+
+    /// Dismiss all popup notifications, fading them out if animation is enabled.
+    pub fn dismiss_notifications(&mut self) {
+        let fade = self.notification_fade();
+        self.notifications
+            .dismiss_all(std::time::Instant::now(), fade);
+        helix_event::request_redraw();
+    }
+
+    /// Dismiss the most recent popup notification.
+    pub fn dismiss_notification(&mut self) {
+        let fade = self.notification_fade();
+        self.notifications
+            .dismiss_top(std::time::Instant::now(), fade);
+        helix_event::request_redraw();
+    }
+
+    /// Dismiss the notification at the given screen cell, if any. Returns whether
+    /// one was hit.
+    pub fn dismiss_notification_at(&mut self, column: u16, row: u16) -> bool {
+        let fade = self.notification_fade();
+        let dismissed =
+            self.notifications
+                .dismiss_at(column, row, std::time::Instant::now(), fade);
+        if dismissed {
+            helix_event::request_redraw();
+        }
+        dismissed
+    }
+
     #[inline]
     pub fn set_status<T: Into<Cow<'static, str>>>(&mut self, status: T) {
         let status = status.into();
