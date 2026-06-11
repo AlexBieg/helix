@@ -5,6 +5,7 @@ mod info;
 pub mod lsp;
 mod markdown;
 pub mod menu;
+pub mod notification;
 pub mod overlay;
 pub mod picker;
 pub mod popup;

@@ -22,6 +22,7 @@
 - [`[editor.smart-tab]` Section](#editorsmart-tab-section)
 - [`[editor.inline-diagnostics]` Section](#editorinline-diagnostics-section)
 - [`[editor.word-completion]` Section](#editorword-completion-section)
+- [`[editor.notifications]` Section](#editornotifications-section)
 
 ### `[editor]` Section
 
@@ -528,4 +529,31 @@ Example:
 enable = true
 # Set the trigger length lower so that words are completed more often
 trigger-length = 4
+```
+
+### `[editor.notifications]` Section
+
+Popup notifications ("toasts") shown in the top-right corner. Status, warning,
+and error messages appear as color-coded popups and are also mirrored to the
+status line. Dismiss the whole stack with `Space N` (`dismiss_notifications`),
+the most recent one with `dismiss_notification`, or click a notification to
+close it. Trigger one manually with `:notify` (e.g. `:notify -s warning hello`).
+
+| Key           | Description                                                                 | Default |
+| ---           | ---                                                                         | ---     |
+| `enable`      | Whether to show popup notifications. When disabled, messages only appear on the status line | `true`  |
+| `max-visible` | Maximum number of notifications shown at once; the rest collapse into a `+N more` indicator | `5`     |
+| `animate`     | Whether to animate notifications                                            | `true`  |
+| `timeout`     | Auto-dismiss timeouts in milliseconds per severity. `0` means sticky (dismissed only by the user) | `{ hint = 2000, info = 3000, warning = 5000, error = 0 }` |
+
+Example:
+
+```toml
+[editor.notifications]
+max-visible = 3
+
+[editor.notifications.timeout]
+# Keep info messages on screen a little longer, and make errors auto-dismiss.
+info = 5000
+error = 10000
 ```

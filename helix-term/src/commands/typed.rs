@@ -2910,6 +2910,59 @@ fn echo(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow:
     Ok(())
 }
 
+const NOTIFY_SEVERITY_FLAG: Flag = Flag {
+    name: "severity",
+    alias: Some('s'),
+    doc: "notification severity: hint, info, warning, or error (default info)",
+    completions: Some(&["hint", "info", "warning", "error"]),
+};
+
+const NOTIFY_REPEAT_FLAG: Flag = Flag {
+    name: "repeat",
+    alias: Some('r'),
+    doc: "show the notification this many times",
+    completions: Some(&[]),
+};
+
+fn notify(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    use helix_view::editor::Severity;
+
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    let severity = match args.get_flag("severity") {
+        None | Some("info") => Severity::Info,
+        Some("hint") => Severity::Hint,
+        Some("warning") => Severity::Warning,
+        Some("error") => Severity::Error,
+        Some(other) => bail!("invalid severity '{other}', expected hint, info, warning, or error"),
+    };
+    let repeat: usize = match args.get_flag("repeat") {
+        Some(value) => value.parse().context("--repeat expects a number")?,
+        None => 1,
+    };
+
+    // Join the positionals and treat a literal "\n" as a line break so
+    // multi-line toasts are easy to trigger from the command line.
+    let message = args
+        .into_iter()
+        .fold(String::new(), |mut acc, arg| {
+            if !acc.is_empty() {
+                acc.push(' ');
+            }
+            acc.push_str(&arg);
+            acc
+        })
+        .replace("\\n", "\n");
+
+    for _ in 0..repeat.max(1) {
+        cx.editor.push_notification(message.clone(), severity);
+    }
+
+    Ok(())
+}
+
 fn noop(_cx: &mut compositor::Context, _args: Args, _event: PromptEvent) -> anyhow::Result<()> {
     Ok(())
 }
@@ -4017,6 +4070,18 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (1, None),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "notify",
+        aliases: &[],
+        doc: "Show a popup notification. Useful for testing and theming.",
+        fun: notify,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (1, None),
+            flags: &[NOTIFY_SEVERITY_FLAG, NOTIFY_REPEAT_FLAG],
             ..Signature::DEFAULT
         },
     },

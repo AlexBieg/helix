@@ -20,5 +20,6 @@ mod test {
     mod commands;
     mod file_watcher;
     mod movement;
+    mod notifications;
     mod splits;
 }

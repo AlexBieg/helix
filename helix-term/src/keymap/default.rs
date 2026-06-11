@@ -241,6 +241,7 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "m" => toggle_blame,
             "M" => conflict_file_picker,
             "R" => recent_file_picker,
+            "N" => dismiss_notifications,
             "a" => code_action,
             "'" => last_picker,
             "G" => { "Debug (experimental)" sticky=true

@@ -627,6 +627,8 @@ impl MappableCommand {
         resolve_conflict_keep_theirs, "Resolve conflict keeping theirs (merged) changes",
         resolve_conflict_keep_base, "Resolve conflict keeping base (common ancestor) changes",
         resolve_conflict_keep_both, "Resolve conflict keeping both changes",
+        dismiss_notifications, "Dismiss all popup notifications",
+        dismiss_notification, "Dismiss the most recent popup notification",
     );
 }
 
@@ -732,6 +734,14 @@ impl PartialEq for MappableCommand {
 }
 
 fn no_op(_cx: &mut Context) {}
+
+fn dismiss_notifications(cx: &mut Context) {
+    cx.editor.notifications.dismiss_all();
+}
+
+fn dismiss_notification(cx: &mut Context) {
+    cx.editor.notifications.dismiss_top();
+}
 
 type MoveFn =
     fn(RopeSlice, Range, Direction, usize, Movement, &TextFormat, &mut TextAnnotations) -> Range;

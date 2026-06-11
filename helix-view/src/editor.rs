@@ -10,6 +10,7 @@ use crate::{
     handlers::Handlers,
     info::Info,
     input::KeyEvent,
+    notification::Notifications,
     register::Registers,
     theme::{self, Theme},
     tree::{self, Tree},
@@ -440,6 +441,70 @@ pub struct Config {
     pub file_watcher: FileWatcherConfig,
     /// Whether to show git blame information below the cursor line. Defaults to `false`.
     pub blame: bool,
+    /// Transient popup notification ("toast") behavior.
+    #[serde(default)]
+    pub notifications: NotificationConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct NotificationConfig {
+    /// Whether to show popup notifications. When disabled, messages only appear
+    /// on the status line. Defaults to `true`.
+    pub enable: bool,
+    /// Maximum number of notifications shown at once; the rest collapse into a
+    /// "+N more" indicator. Defaults to 5.
+    pub max_visible: usize,
+    /// Whether to animate notifications. Defaults to `true`. (No-op until the
+    /// animation phase lands.)
+    pub animate: bool,
+    /// Auto-dismiss timeouts in milliseconds, per severity. `0` means sticky
+    /// (dismissed only by the user).
+    pub timeout: NotificationTimeouts,
+}
+
+impl Default for NotificationConfig {
+    fn default() -> Self {
+        Self {
+            enable: true,
+            max_visible: 5,
+            animate: true,
+            timeout: NotificationTimeouts::default(),
+        }
+    }
+}
+
+impl NotificationConfig {
+    /// The auto-dismiss timeout for a severity, or `None` if it should be sticky.
+    pub fn timeout_for(&self, severity: Severity) -> Option<Duration> {
+        let millis = match severity {
+            Severity::Hint => self.timeout.hint,
+            Severity::Info => self.timeout.info,
+            Severity::Warning => self.timeout.warning,
+            Severity::Error => self.timeout.error,
+        };
+        (millis != 0).then(|| Duration::from_millis(millis))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct NotificationTimeouts {
+    pub hint: u64,
+    pub info: u64,
+    pub warning: u64,
+    pub error: u64,
+}
+
+impl Default for NotificationTimeouts {
+    fn default() -> Self {
+        Self {
+            hint: 2000,
+            info: 3000,
+            warning: 5000,
+            error: 0,
+        }
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, Clone, Copy)]
@@ -1192,6 +1257,7 @@ impl Default for Config {
             insecure: false,
             file_watcher: FileWatcherConfig::default(),
             blame: false,
+            notifications: NotificationConfig::default(),
         }
     }
 }
@@ -1262,6 +1328,7 @@ pub struct Editor {
     pub last_selection: Option<Selection>,
 
     pub status_msg: Option<(Cow<'static, str>, Severity)>,
+    pub notifications: Notifications,
     pub autoinfo: Option<Info>,
 
     pub config: Arc<dyn DynAccess<Config>>,
@@ -1425,6 +1492,7 @@ impl Editor {
                 |config: &Config| &config.clipboard_provider,
             ))),
             status_msg: None,
+            notifications: Notifications::default(),
             autoinfo: None,
             idle_timer: Box::pin(sleep(conf.idle_timeout)),
             redraw_timer: Box::pin(sleep(Duration::MAX)),
@@ -1506,29 +1574,50 @@ impl Editor {
             .reset(Instant::now() + config.idle_timeout);
     }
 
+    /// Ensure the editor wakes up to render no later than `deadline`. Used to
+    /// drive time-based UI such as notification auto-dismiss with a single
+    /// scheduled wake-up rather than continuous polling.
+    pub fn request_redraw_at(&mut self, deadline: std::time::Instant) {
+        let delay = deadline.saturating_duration_since(std::time::Instant::now());
+        let deadline = Instant::now() + delay;
+        if deadline < self.redraw_timer.deadline() {
+            self.redraw_timer.as_mut().reset(deadline);
+        }
+    }
+
     pub fn clear_status(&mut self) {
         self.status_msg = None;
+    }
+
+    /// Push a popup notification and mirror it into the status line.
+    pub fn push_notification<T: Into<Cow<'static, str>>>(&mut self, msg: T, severity: Severity) {
+        let msg = msg.into();
+        let timeout = self.config().notifications.timeout_for(severity);
+        self.notifications
+            .push(msg.clone(), severity, timeout, std::time::Instant::now());
+        self.status_msg = Some((msg, severity));
+        helix_event::request_redraw();
     }
 
     #[inline]
     pub fn set_status<T: Into<Cow<'static, str>>>(&mut self, status: T) {
         let status = status.into();
         log::debug!("editor status: {}", status);
-        self.status_msg = Some((status, Severity::Info));
+        self.push_notification(status, Severity::Info);
     }
 
     #[inline]
     pub fn set_error<T: Into<Cow<'static, str>>>(&mut self, error: T) {
         let error = error.into();
         log::debug!("editor error: {}", error);
-        self.status_msg = Some((error, Severity::Error));
+        self.push_notification(error, Severity::Error);
     }
 
     #[inline]
     pub fn set_warning<T: Into<Cow<'static, str>>>(&mut self, warning: T) {
         let warning = warning.into();
         log::warn!("editor warning: {}", warning);
-        self.status_msg = Some((warning, Severity::Warning));
+        self.push_notification(warning, Severity::Warning);
     }
 
     #[inline]

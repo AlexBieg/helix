@@ -12,6 +12,7 @@ use helix_view::{
     document::{DocumentOpenError, DocumentSavedEventResult},
     editor::{ConfigEvent, EditorEvent},
     graphics::Rect,
+    input::{MouseButton, MouseEventKind},
     theme,
     tree::Layout,
     Align, Editor,
@@ -282,6 +283,8 @@ impl Application {
         let surface = self.terminal.current_buffer_mut();
 
         self.compositor.render(area, surface, &mut cx);
+        // Notifications render on top of every compositor layer.
+        crate::ui::notification::render(area, surface, &mut cx);
         let (pos, kind) = self.compositor.cursor(area, &self.editor);
         // reset cursor cache
         self.editor.cursor_cache.reset();
@@ -336,9 +339,7 @@ impl Application {
                         helix_event::status::Severity::Warning => Severity::Warning,
                         helix_event::status::Severity::Error => Severity::Error,
                     };
-                    // TODO: show multiple status messages at once to avoid clobbering
-                    self.editor.status_msg = Some((msg.message, severity));
-                    helix_event::request_redraw();
+                    self.editor.push_notification(msg.message, severity);
                 }
                 Some(callback) = self.jobs.wait_futures.next() => {
                     self.jobs.handle_callback(&mut self.editor, &mut self.compositor, callback);
@@ -856,7 +857,19 @@ impl Application {
             }) => false,
             #[cfg(not(windows))]
             event if event.is_escape() => false,
-            event => self.compositor.handle_event(&event.into(), &mut cx),
+            event => {
+                let event: Event = event.into();
+                // A left click on a toast dismisses it without disturbing the
+                // editor underneath. Other events fall through to the compositor.
+                let dismissed = matches!(
+                    &event,
+                    Event::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                ) && {
+                    let Event::Mouse(mouse) = &event else { unreachable!() };
+                    cx.editor.notifications.dismiss_at(mouse.column, mouse.row)
+                };
+                dismissed || self.compositor.handle_event(&event, &mut cx)
+            }
         };
 
         if should_redraw && !self.editor.should_close() {
