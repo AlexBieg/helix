@@ -70,3 +70,14 @@ Custom features added on top of upstream Helix.
 - Added `unified_diff()` to `helix-core::diff` for computing diff text from two ropes
 - Added `with_content_preview()` builder to the generic `Picker` component for custom preview content
 - Language detection uses the original filename, so code lines within the diff get syntax highlighting via tree-sitter error recovery; unknown extensions fall back to the `diff` grammar
+
+### Merge conflict resolution
+- Added `conflict_file_picker` — lists all files in merge conflict state via git status, showing an `"x conflict"` label and file preview. On open, the cursor jumps to the first conflict region. Bindable in config (no default key).
+- Added conflict navigation — `[m` / `]m` jump to previous/next merge conflict, `[M` / `]M` jump to first/last. Follows the same motion pattern as `[g` / `]g` for diff hunks.
+- Added conflict resolution commands:
+  - `:keep-ours` (aliases: `:keep-head`, `:accept-ours`, `:ours`) — resolve conflict keeping ours (HEAD) changes
+  - `:keep-theirs` (aliases: `:keep-main`, `:accept-theirs`, `:theirs`) — resolve conflict keeping theirs (merged branch) changes
+  - `:keep-both` (aliases: `:accept-both`, `:both`) — resolve conflict keeping both changes (ours then theirs)
+- Also available as mappable static commands: `resolve_conflict_keep_ours`, `resolve_conflict_keep_theirs`, `resolve_conflict_keep_both`
+- Core parsing: `ConflictRegion` struct and `find_conflict_regions()` scan a buffer for `<<<<<<<`/`=======`/`>>>>>>>` markers
+- Resolution replaces the entire conflict region (markers and all) with the chosen section via a single `Transaction::change`

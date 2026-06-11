@@ -2641,6 +2641,42 @@ fn reset_diff_change(
     Ok(())
 }
 
+fn keep_ours(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    resolve_conflict_at_cursor_editor(cx.editor, ConflictResolution::Ours);
+    Ok(())
+}
+
+fn keep_theirs(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    resolve_conflict_at_cursor_editor(cx.editor, ConflictResolution::Theirs);
+    Ok(())
+}
+
+fn keep_both(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    resolve_conflict_at_cursor_editor(cx.editor, ConflictResolution::Both);
+    Ok(())
+}
+
 fn clear_register(
     cx: &mut compositor::Context,
     args: Args,
@@ -3998,7 +4034,31 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         fun: untrust_workspace,
         completer: CommandCompleter::none(),
         signature: Signature { positionals: (0, None), ..Signature::DEFAULT },
-    }
+    },
+    TypableCommand {
+        name: "keep-ours",
+        aliases: &["keep-head", "accept-ours", "ours"],
+        doc: "Resolve merge conflict keeping ours changes.",
+        fun: keep_ours,
+        completer: CommandCompleter::none(),
+        signature: Signature::DEFAULT,
+    },
+    TypableCommand {
+        name: "keep-theirs",
+        aliases: &["keep-main", "accept-theirs", "theirs"],
+        doc: "Resolve merge conflict keeping theirs changes.",
+        fun: keep_theirs,
+        completer: CommandCompleter::none(),
+        signature: Signature::DEFAULT,
+    },
+    TypableCommand {
+        name: "keep-both",
+        aliases: &["accept-both", "both"],
+        doc: "Resolve merge conflict keeping both changes (ours then theirs).",
+        fun: keep_both,
+        completer: CommandCompleter::none(),
+        signature: Signature::DEFAULT,
+    },
 ];
 
 pub static TYPABLE_COMMAND_MAP: Lazy<HashMap<&'static str, &'static TypableCommand>> =

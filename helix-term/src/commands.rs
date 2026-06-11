@@ -617,6 +617,14 @@ impl MappableCommand {
         goto_prev_tabstop, "Goto next snippet placeholder",
         rotate_selections_first, "Make the first selection your primary one",
         rotate_selections_last, "Make the last selection your primary one",
+        conflict_file_picker, "Open merge conflict file picker",
+        goto_next_conflict, "Goto next merge conflict",
+        goto_prev_conflict, "Goto previous merge conflict",
+        goto_first_conflict, "Goto first merge conflict",
+        goto_last_conflict, "Goto last merge conflict",
+        resolve_conflict_keep_ours, "Resolve conflict keeping ours (HEAD) changes",
+        resolve_conflict_keep_theirs, "Resolve conflict keeping theirs (merged) changes",
+        resolve_conflict_keep_both, "Resolve conflict keeping both changes",
     );
 }
 
@@ -3595,6 +3603,95 @@ fn changed_file_picker(cx: &mut Context) {
     cx.push_layer(Box::new(overlaid(picker)));
 }
 
+fn conflict_file_picker(cx: &mut Context) {
+    struct ConflictPickerData {
+        cwd: PathBuf,
+        style_conflict: Style,
+    }
+
+    let cwd = helix_stdx::env::current_working_dir();
+    if !cwd.exists() {
+        cx.editor
+            .set_error("Current working directory does not exist");
+        return;
+    }
+
+    let conflict_style = cx.editor.theme.get("diff.delta.conflict");
+
+    let columns = [
+        PickerColumn::new("status", |_: &FileChange, data: &ConflictPickerData| {
+            Span::styled("x conflict", data.style_conflict).into()
+        }),
+        PickerColumn::new("path", |change: &FileChange, data: &ConflictPickerData| {
+            change
+                .path()
+                .strip_prefix(&data.cwd)
+                .unwrap_or(change.path())
+                .display()
+                .to_string()
+                .into()
+        }),
+    ];
+
+    let picker = Picker::new(
+        columns,
+        1,
+        [],
+        ConflictPickerData {
+            cwd: cwd.clone(),
+            style_conflict: conflict_style,
+        },
+        |cx, meta: &FileChange, action| {
+            let path = meta.path().to_owned();
+            match cx.editor.open(&path, action) {
+                Ok(doc_id) => {
+                    let anchor = {
+                        let doc = &cx.editor.documents[&doc_id];
+                        let text = doc.text().slice(..);
+                        find_conflict_regions(text)
+                            .first()
+                            .map(|r| text.line_to_char(r.start_marker_line))
+                    };
+                    if let Some(anchor) = anchor {
+                        let doc = cx.editor.documents.get_mut(&doc_id).unwrap();
+                        let view_id = cx.editor.tree.focus;
+                        doc.set_selection(view_id, Selection::single(anchor, anchor));
+                    }
+                }
+                Err(e) => {
+                    let err = if let Some(err) = e.source() {
+                        format!("{}", err)
+                    } else {
+                        format!("unable to open \"{}\"", path.display())
+                    };
+                    cx.editor.set_error(err);
+                }
+            }
+        },
+    )
+    .with_preview(|_editor, meta| Some((meta.path().into(), None)));
+
+    let injector = picker.injector();
+
+    cx.editor
+        .diff_providers
+        .clone()
+        .for_each_changed_file(cwd, move |change| match change {
+            Ok(change) => {
+                if matches!(change, FileChange::Conflict { .. }) {
+                    injector.push(change).is_ok()
+                } else {
+                    true
+                }
+            }
+            Err(err) => {
+                status::report_blocking(err);
+                true
+            }
+        });
+    cx.push_layer(Box::new(overlaid(picker)));
+}
+
 fn recent_file_picker(cx: &mut Context) {
     let recent: Vec<PathBuf> = cx
         .editor
@@ -4349,6 +4446,262 @@ fn hunk_range(hunk: Hunk, text: RopeSlice) -> Range {
     };
 
     Range::new(anchor, head)
+}
+
+// --- Merge conflict resolution ---
+
+/// Returns `true` if the line starts with the given string prefix.
+fn line_starts_with(line: RopeSlice, prefix: &str) -> bool {
+    line.chars().zip(prefix.chars()).all(|(a, b)| a == b)
+}
+
+/// Returns `true` if the line is a conflict divider (`=======`).
+fn is_conflict_divider(line: RopeSlice) -> bool {
+    let text: String = line.chars().collect();
+    text.trim() == "======="
+}
+
+/// A parsed merge conflict region in a document.
+#[derive(Debug, Clone, Copy)]
+pub struct ConflictRegion {
+    /// 0-indexed line of the `<<<<<<<` marker
+    pub start_marker_line: usize,
+    /// 0-indexed line of the `=======` divider
+    pub divider_line: usize,
+    /// 0-indexed line of the `>>>>>>>` marker
+    pub end_marker_line: usize,
+}
+
+/// Finds all merge conflict regions by scanning for conflict markers.
+pub fn find_conflict_regions(text: RopeSlice) -> Vec<ConflictRegion> {
+    let mut regions = Vec::new();
+    let total_lines = text.len_lines();
+    let mut i = 0;
+
+    while i < total_lines {
+        let line = text.line(i);
+        if line_starts_with(line, "<<<<<<<") {
+            let start = i;
+
+            loop {
+                i += 1;
+                if i >= total_lines {
+                    return regions;
+                }
+                if is_conflict_divider(text.line(i)) {
+                    break;
+                }
+            }
+            let divider = i;
+
+            loop {
+                i += 1;
+                if i >= total_lines {
+                    return regions;
+                }
+                if line_starts_with(text.line(i), ">>>>>>>") {
+                    break;
+                }
+            }
+            let end = i;
+
+            regions.push(ConflictRegion {
+                start_marker_line: start,
+                divider_line: divider,
+                end_marker_line: end,
+            });
+        }
+        i += 1;
+    }
+
+    regions
+}
+
+/// Returns the conflict region that contains the given line, if any.
+pub fn conflict_at_line(text: RopeSlice, cursor_line: usize) -> Option<ConflictRegion> {
+    find_conflict_regions(text)
+        .into_iter()
+        .find(|r| cursor_line >= r.start_marker_line && cursor_line <= r.end_marker_line)
+}
+
+/// Strategy for resolving a merge conflict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictResolution {
+    /// Keep the HEAD (ours) section — text between <<<<<<< and =======.
+    Ours,
+    /// Keep the merged branch (theirs) section — text between ======= and >>>>>>>.
+    Theirs,
+    /// Keep both sections, ours first then theirs.
+    Both,
+}
+
+/// Resolve the merge conflict at the cursor using the given strategy.
+pub fn resolve_conflict_at_cursor_editor(editor: &mut Editor, resolution: ConflictResolution) {
+    let scrolloff = editor.config().scrolloff;
+    let (view, doc) = current!(editor);
+    let text = doc.text().slice(..);
+    let selection = doc.selection(view.id);
+    let cursor_line = selection.primary().cursor_line(text);
+
+    let Some(region) = conflict_at_line(text, cursor_line) else {
+        editor.set_error("No merge conflict at cursor");
+        return;
+    };
+
+    let from = text.line_to_char(region.start_marker_line);
+    let to = text.line_to_char((region.end_marker_line + 1).min(text.len_lines()));
+
+    let replacement = match resolution {
+        ConflictResolution::Ours => {
+            let start = text.line_to_char(region.start_marker_line + 1);
+            let end = text.line_to_char(region.divider_line);
+            text.slice(start..end).chunks().collect::<Tendril>()
+        }
+        ConflictResolution::Theirs => {
+            let start = text.line_to_char(region.divider_line + 1);
+            let end = text.line_to_char(region.end_marker_line);
+            text.slice(start..end).chunks().collect::<Tendril>()
+        }
+        ConflictResolution::Both => {
+            let ours: String = text
+                .slice(
+                    text.line_to_char(region.start_marker_line + 1)
+                        ..text.line_to_char(region.divider_line),
+                )
+                .chunks()
+                .collect();
+            let theirs: String = text
+                .slice(
+                    text.line_to_char(region.divider_line + 1)
+                        ..text.line_to_char(region.end_marker_line),
+                )
+                .chunks()
+                .collect();
+            Tendril::from(format!("{ours}{theirs}"))
+        }
+    };
+
+    let transaction =
+        Transaction::change(doc.text(), std::iter::once((from, to, Some(replacement))));
+    doc.apply(&transaction, view.id);
+    doc.append_changes_to_history(view);
+    view.ensure_cursor_in_view(doc, scrolloff);
+
+    match resolution {
+        ConflictResolution::Ours => editor.set_status("Kept ours changes"),
+        ConflictResolution::Theirs => editor.set_status("Kept theirs changes"),
+        ConflictResolution::Both => editor.set_status("Kept both changes"),
+    }
+}
+
+/// Resolve the merge conflict at the cursor using the given strategy.
+pub fn resolve_conflict_at_cursor(cx: &mut Context, resolution: ConflictResolution) {
+    resolve_conflict_at_cursor_editor(cx.editor, resolution);
+}
+
+fn resolve_conflict_keep_ours(cx: &mut Context) {
+    resolve_conflict_at_cursor(cx, ConflictResolution::Ours);
+}
+
+fn resolve_conflict_keep_theirs(cx: &mut Context) {
+    resolve_conflict_at_cursor(cx, ConflictResolution::Theirs);
+}
+
+fn resolve_conflict_keep_both(cx: &mut Context) {
+    resolve_conflict_at_cursor(cx, ConflictResolution::Both);
+}
+
+fn goto_next_conflict(cx: &mut Context) {
+    goto_conflict_impl(cx, Direction::Forward);
+}
+
+fn goto_prev_conflict(cx: &mut Context) {
+    goto_conflict_impl(cx, Direction::Backward);
+}
+
+fn goto_first_conflict(cx: &mut Context) {
+    goto_first_conflict_impl(cx, false);
+}
+
+fn goto_last_conflict(cx: &mut Context) {
+    goto_first_conflict_impl(cx, true);
+}
+
+fn goto_first_conflict_impl(cx: &mut Context, reverse: bool) {
+    let editor = &mut cx.editor;
+    let (view, doc) = current!(editor);
+    let text = doc.text().slice(..);
+    let regions = find_conflict_regions(text);
+
+    if regions.is_empty() {
+        editor.set_status("No merge conflicts in buffer");
+        return;
+    }
+
+    let region = if reverse {
+        regions.last()
+    } else {
+        regions.first()
+    }
+    .unwrap();
+    let anchor = text.line_to_char(region.start_marker_line);
+    let head = text.line_to_char(region.end_marker_line + 1);
+
+    push_jump(view, doc);
+    doc.set_selection(view.id, Selection::single(anchor, head));
+}
+
+fn goto_conflict_impl(cx: &mut Context, direction: Direction) {
+    let count = cx.count().saturating_sub(1);
+    let motion = move |editor: &mut Editor| {
+        let (view, doc) = current!(editor);
+        let doc_text = doc.text().slice(..);
+        let regions = find_conflict_regions(doc_text);
+
+        if regions.is_empty() {
+            editor.set_status("No merge conflicts in buffer");
+            return;
+        }
+
+        let selection = doc.selection(view.id).clone().transform(|range| {
+            let cursor_line = range.cursor_line(doc_text);
+
+            let current_idx = match direction {
+                Direction::Forward => {
+                    regions.iter().position(|r| r.start_marker_line > cursor_line)
+                }
+                Direction::Backward => {
+                    regions.iter().rposition(|r| r.end_marker_line < cursor_line)
+                }
+            };
+
+            let target_idx = match (direction, current_idx) {
+                (Direction::Forward, Some(idx)) => (idx + count).min(regions.len() - 1),
+                (Direction::Forward, None) => count.min(regions.len() - 1),
+                (Direction::Backward, Some(idx)) => idx.saturating_sub(count),
+                (Direction::Backward, None) => (regions.len() - 1).saturating_sub(count),
+            };
+
+            let region = &regions[target_idx];
+            let anchor = doc_text.line_to_char(region.start_marker_line);
+            let head = doc_text.line_to_char(region.end_marker_line + 1);
+
+            if editor.mode == Mode::Select {
+                let head = if head < range.anchor {
+                    anchor
+                } else {
+                    head
+                };
+                Range::new(range.anchor, head)
+            } else {
+                Range::new(anchor, head).with_direction(direction)
+            }
+        });
+
+        push_jump(view, doc);
+        doc.set_selection(view.id, selection)
+    };
+    cx.editor.apply_motion(motion);
 }
 
 pub mod insert {
