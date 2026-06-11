@@ -2665,6 +2665,18 @@ fn keep_theirs(
     Ok(())
 }
 
+fn keep_base(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    resolve_conflict_at_cursor_editor(cx.editor, ConflictResolution::Base);
+    Ok(())
+}
+
 fn keep_both(
     cx: &mut compositor::Context,
     _args: Args,
@@ -4048,6 +4060,14 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         aliases: &["keep-main", "accept-theirs", "theirs"],
         doc: "Resolve merge conflict keeping theirs changes.",
         fun: keep_theirs,
+        completer: CommandCompleter::none(),
+        signature: Signature::DEFAULT,
+    },
+    TypableCommand {
+        name: "keep-base",
+        aliases: &["accept-base", "base"],
+        doc: "Resolve diff3 merge conflict keeping base (common ancestor) changes.",
+        fun: keep_base,
         completer: CommandCompleter::none(),
         signature: Signature::DEFAULT,
     },

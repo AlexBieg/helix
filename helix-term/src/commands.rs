@@ -624,6 +624,7 @@ impl MappableCommand {
         goto_last_conflict, "Goto last merge conflict",
         resolve_conflict_keep_ours, "Resolve conflict keeping ours (HEAD) changes",
         resolve_conflict_keep_theirs, "Resolve conflict keeping theirs (merged) changes",
+        resolve_conflict_keep_base, "Resolve conflict keeping base (common ancestor) changes",
         resolve_conflict_keep_both, "Resolve conflict keeping both changes",
     );
 }
@@ -4552,10 +4553,12 @@ pub fn conflict_at_line(text: RopeSlice, cursor_line: usize) -> Option<ConflictR
 /// Strategy for resolving a merge conflict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictResolution {
-    /// Keep the HEAD (ours) section — text between <<<<<<< and =======.
+    /// Keep the HEAD (ours) section — text between <<<<<<< and ======= (or ||||||| in diff3).
     Ours,
     /// Keep the merged branch (theirs) section — text between ======= and >>>>>>>.
     Theirs,
+    /// Keep the common ancestor (base) section — text between ||||||| and ======= in diff3 conflicts.
+    Base,
     /// Keep both sections, ours first then theirs.
     Both,
 }
@@ -4588,6 +4591,15 @@ pub fn resolve_conflict_at_cursor_editor(editor: &mut Editor, resolution: Confli
             let end = text.line_to_char(region.end_marker_line);
             text.slice(start..end).chunks().collect::<Tendril>()
         }
+        ConflictResolution::Base => {
+            let Some(base_line) = region.base_divider_line else {
+                editor.set_error("No base section in conflict (not a diff3 conflict)");
+                return;
+            };
+            let start = text.line_to_char(base_line + 1);
+            let end = text.line_to_char(region.divider_line);
+            text.slice(start..end).chunks().collect::<Tendril>()
+        }
         ConflictResolution::Both => {
             let ours_end = region.base_divider_line.unwrap_or(region.divider_line);
             let ours: String = text
@@ -4617,6 +4629,7 @@ pub fn resolve_conflict_at_cursor_editor(editor: &mut Editor, resolution: Confli
     match resolution {
         ConflictResolution::Ours => editor.set_status("Kept ours changes"),
         ConflictResolution::Theirs => editor.set_status("Kept theirs changes"),
+        ConflictResolution::Base => editor.set_status("Kept base changes"),
         ConflictResolution::Both => editor.set_status("Kept both changes"),
     }
 }
@@ -4632,6 +4645,10 @@ fn resolve_conflict_keep_ours(cx: &mut Context) {
 
 fn resolve_conflict_keep_theirs(cx: &mut Context) {
     resolve_conflict_at_cursor(cx, ConflictResolution::Theirs);
+}
+
+fn resolve_conflict_keep_base(cx: &mut Context) {
+    resolve_conflict_at_cursor(cx, ConflictResolution::Base);
 }
 
 fn resolve_conflict_keep_both(cx: &mut Context) {
