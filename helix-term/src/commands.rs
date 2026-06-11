@@ -4461,11 +4461,18 @@ fn is_conflict_divider(line: RopeSlice) -> bool {
     text.trim() == "======="
 }
 
+/// Returns `true` if the line is a diff3 base divider (`|||||||`).
+fn is_base_divider(line: RopeSlice) -> bool {
+    line_starts_with(line, "|||||||")
+}
+
 /// A parsed merge conflict region in a document.
 #[derive(Debug, Clone, Copy)]
 pub struct ConflictRegion {
     /// 0-indexed line of the `<<<<<<<` marker
     pub start_marker_line: usize,
+    /// 0-indexed line of the `|||||||` diff3 base divider, if present
+    pub base_divider_line: Option<usize>,
     /// 0-indexed line of the `=======` divider
     pub divider_line: usize,
     /// 0-indexed line of the `>>>>>>>` marker
@@ -4482,13 +4489,30 @@ pub fn find_conflict_regions(text: RopeSlice) -> Vec<ConflictRegion> {
         let line = text.line(i);
         if line_starts_with(line, "<<<<<<<") {
             let start = i;
+            let mut base_divider = None;
 
+            // Scan for divider: check for diff3 ||||||| first, then =======
             loop {
                 i += 1;
                 if i >= total_lines {
                     return regions;
                 }
-                if is_conflict_divider(text.line(i)) {
+                let line = text.line(i);
+                if is_base_divider(line) {
+                    base_divider = Some(i);
+                    // Scan past the base section to find =======
+                    loop {
+                        i += 1;
+                        if i >= total_lines {
+                            return regions;
+                        }
+                        if is_conflict_divider(text.line(i)) {
+                            break;
+                        }
+                    }
+                    break;
+                }
+                if is_conflict_divider(line) {
                     break;
                 }
             }
@@ -4507,6 +4531,7 @@ pub fn find_conflict_regions(text: RopeSlice) -> Vec<ConflictRegion> {
 
             regions.push(ConflictRegion {
                 start_marker_line: start,
+                base_divider_line: base_divider,
                 divider_line: divider,
                 end_marker_line: end,
             });
@@ -4553,8 +4578,9 @@ pub fn resolve_conflict_at_cursor_editor(editor: &mut Editor, resolution: Confli
 
     let replacement = match resolution {
         ConflictResolution::Ours => {
+            let ours_end = region.base_divider_line.unwrap_or(region.divider_line);
             let start = text.line_to_char(region.start_marker_line + 1);
-            let end = text.line_to_char(region.divider_line);
+            let end = text.line_to_char(ours_end);
             text.slice(start..end).chunks().collect::<Tendril>()
         }
         ConflictResolution::Theirs => {
@@ -4563,10 +4589,11 @@ pub fn resolve_conflict_at_cursor_editor(editor: &mut Editor, resolution: Confli
             text.slice(start..end).chunks().collect::<Tendril>()
         }
         ConflictResolution::Both => {
+            let ours_end = region.base_divider_line.unwrap_or(region.divider_line);
             let ours: String = text
                 .slice(
                     text.line_to_char(region.start_marker_line + 1)
-                        ..text.line_to_char(region.divider_line),
+                        ..text.line_to_char(ours_end),
                 )
                 .chunks()
                 .collect();
