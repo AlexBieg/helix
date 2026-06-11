@@ -1,0 +1,29 @@
+helix-view/src/editor.rs
+  s_d4ca5cbe5aa6fc::t_b2443ef9e634cf 1602-1639
+helix-view/src/notification.rs
+  s_d4ca5cbe5aa6fc::t_b2443ef9e634cf 15-19,37-47,98-108,111-119,122-126,129-131,140,250,257-260,263-264,267-283,287-296,304-307
+helix-term/src/ui/notification.rs
+  s_d4ca5cbe5aa6fc::t_b2443ef9e634cf 1-2,6,28-32,39-40,50,64-65,71,74,78-79,82-99,101-102,118,122-128,133-203,267-268,443-486
+docs/notifications-design.md
+  s_d4ca5cbe5aa6fc::t_b2443ef9e634cf 170-202,323-326
+helix-term/src/application.rs
+  s_d4ca5cbe5aa6fc::t_b2443ef9e634cf 869
+helix-term/src/commands.rs
+  s_d4ca5cbe5aa6fc::t_b2443ef9e634cf 739,743
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "cba22f4507eef6a392eca55261a363294b2a6ea6",
+  "prompts": {},
+  "sessions": {
+    "s_d4ca5cbe5aa6fc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11387119-c031-46f1-886d-c9ec4c13d586",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Alex Bieg <alexbieg-hw@users.noreply.github.com>"
+    }
+  }
+}
