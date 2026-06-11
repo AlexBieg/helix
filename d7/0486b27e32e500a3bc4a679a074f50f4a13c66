@@ -1,0 +1,49 @@
+FUTURE.md
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 36-43
+helix-term/src/ui/notification.rs
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 1-350
+book/src/keymap.md
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 311
+helix-term/src/ui/mod.rs
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 8
+book/src/editor.md
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 25,533-558
+helix-term/src/commands/typed.rs
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 2913-2965,4076-4084
+helix-term/src/commands.rs
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 630-631,738-744
+helix-term/tests/integration.rs
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 23
+helix-term/tests/test/notifications.rs
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 1-111
+helix-view/src/notification.rs
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 1-270
+helix-view/src/lib.rs
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 17
+docs/notifications-design.md
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 1-319
+helix-term/src/keymap/default.rs
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 244
+theme.toml
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 54
+helix-view/src/editor.rs
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 13,444-507,1260,1331,1495,1577-1587,1592-1601,1606,1613,1620
+helix-term/src/application.rs
+  s_d4ca5cbe5aa6fc::t_966a31096abde3 15,286-287,342,860-872
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "d70486b27e32e500a3bc4a679a074f50f4a13c66",
+  "prompts": {},
+  "sessions": {
+    "s_d4ca5cbe5aa6fc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11387119-c031-46f1-886d-c9ec4c13d586",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Alex Bieg <alexbieg-hw@users.noreply.github.com>"
+    }
+  }
+}
