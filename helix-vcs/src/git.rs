@@ -17,7 +17,7 @@ use gix::status::{
 };
 use gix::{Commit, ObjectId, Repository, ThreadSafeRepository};
 
-use crate::FileChange;
+use crate::{BlameEntry, FileChange};
 
 #[cfg(test)]
 mod test;
@@ -216,4 +216,72 @@ fn find_file_in_commit(repo: &Repository, commit: &Commit, file: &Path) -> Resul
         // found a file
         EntryKind::Blob | EntryKind::BlobExecutable => Ok(tree_entry.object_id()),
     }
+}
+
+pub fn get_blame(file: &Path) -> Result<Vec<BlameEntry>> {
+    debug_assert!(!file.exists() || file.is_file());
+    debug_assert!(file.is_absolute());
+
+    let file = gix::path::realpath(file).context("resolve symlinks")?;
+    let repo_dir = get_repo_dir(&file)?;
+    let repo = open_repo(repo_dir)
+        .context("failed to open git repo")?
+        .to_thread_local();
+    let head = repo.head_commit()?;
+    let _file_oid = find_file_in_commit(&repo, &head, &file)?;
+    let head_commit_id = head.id;
+
+    let work_dir = repo.workdir().context("repo has no worktree")?;
+    let rela_path = file.strip_prefix(work_dir)?;
+    let rela_path = gix::path::try_into_bstr(rela_path)?;
+
+    let options = gix::repository::blame_file::Options::default();
+    let outcome = repo
+        .blame_file(rela_path.as_ref(), head_commit_id, options)
+        .context("git blame failed")?;
+
+    let mut entries = Vec::new();
+    for blame_entry in outcome.entries {
+        let start = blame_entry.start_in_blamed_file as usize;
+        let len = blame_entry.len.get() as usize;
+
+        let commit = repo.find_commit(blame_entry.commit_id)?;
+        let commit_id = blame_entry.commit_id.to_hex_with_len(8).to_string();
+
+        let author = commit
+            .author()
+            .map(|a| a.name.to_string())
+            .unwrap_or_default();
+
+        let time = commit
+            .time()
+            .ok()
+            .and_then(|t| t.format(gix::date::time::format::SHORT).ok())
+            .unwrap_or_default();
+
+        let summary = commit
+            .message()
+            .ok()
+            .map(|m| m.title.to_string())
+            .unwrap_or_default();
+
+        for line in start..start + len {
+            while entries.len() <= line {
+                entries.push(BlameEntry {
+                    commit: String::new(),
+                    author: String::new(),
+                    time: String::new(),
+                    summary: String::new(),
+                });
+            }
+            entries[line] = BlameEntry {
+                commit: commit_id.clone(),
+                author: author.clone(),
+                time: time.clone(),
+                summary: summary.clone(),
+            };
+        }
+    }
+
+    Ok(entries)
 }

@@ -300,6 +300,8 @@ This layer is a kludge of mappings, mostly pickers.
 | `b`     | Open buffer picker                                                      | `buffer_picker`                            |
 | `j`     | Open jumplist picker                                                    | `jumplist_picker`                          |
 | `g`     | Open changed file picker                                                | `changed_file_picker`                      |
+| `m`     | Toggle git blame for the current line                                   | `toggle_blame`                             |
+| `M`     | Open merge conflict file picker                                         | `conflict_file_picker`                     |
 | `G`     | Debug (experimental)                                                    | N/A                                        |
 | `k`     | Show documentation for item under cursor in a [popup](#popup) (**LSP**) | `hover`                                    |
 | `s`     | Open document symbol picker (**LSP** or **TS**)                         | `lsp_or_syntax_symbol_picker`              |

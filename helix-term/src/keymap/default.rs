@@ -238,6 +238,7 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "d" => diagnostics_picker,
             "D" => workspace_diagnostics_picker,
             "g" => changed_file_picker,
+            "m" => toggle_blame,
             "M" => conflict_file_picker,
             "R" => recent_file_picker,
             "a" => code_action,

@@ -9,6 +9,9 @@ use crate::ui::document::{LinePos, TextRenderer};
 pub use diagnostics::InlineDiagnostics;
 
 mod diagnostics;
+mod blame;
+
+pub use blame::BlameDecoration;
 
 /// Decorations are the primary mechanism for extending the text rendering.
 ///

@@ -20,6 +20,15 @@ mod status;
 
 pub use status::FileChange;
 
+/// Entry produced by `git blame` for a single line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlameEntry {
+    pub commit: String,
+    pub author: String,
+    pub time: String,
+    pub summary: String,
+}
+
 /// Contains all active diff providers. Diff providers are compiled in via features. Currently
 /// only `git` is supported.
 #[derive(Clone)]
@@ -75,6 +84,19 @@ impl DiffProviderRegistry {
             }
         });
     }
+
+    pub fn get_blame(&self, file: &Path) -> Option<Vec<BlameEntry>> {
+        self.providers
+            .iter()
+            .find_map(|provider| match provider.get_blame(file) {
+                Ok(res) => Some(res),
+                Err(err) => {
+                    log::debug!("{err:#?}");
+                    log::debug!("failed to get blame for {}", file.display());
+                    None
+                }
+            })
+    }
 }
 
 impl Default for DiffProviderRegistry {
@@ -127,6 +149,14 @@ impl DiffProvider {
             #[cfg(feature = "git")]
             Self::Git => git::for_each_changed_file(cwd, f),
             Self::None => bail!("No diff support compiled in"),
+        }
+    }
+
+    fn get_blame(&self, file: &Path) -> Result<Vec<BlameEntry>> {
+        match self {
+            #[cfg(feature = "git")]
+            Self::Git => git::get_blame(file),
+            Self::None => bail!("no diff support compiled in"),
         }
     }
 }

@@ -8,7 +8,7 @@ use crate::{
     ui::{
         document::{render_document, LinePos, TextRenderer},
         statusline,
-        text_decorations::{self, Decoration, DecorationManager, InlineDiagnostics},
+        text_decorations::{self, BlameDecoration, Decoration, DecorationManager, InlineDiagnostics},
         Completion, ProgressSpinners,
     },
 };
@@ -209,6 +209,9 @@ impl EditorView {
             inline_diagnostic_config,
             config.end_of_line_diagnostics,
         ));
+        if config.blame {
+            decorations.add_decoration(BlameDecoration::new(doc, theme, primary_cursor));
+        }
         render_document(
             surface,
             inner,

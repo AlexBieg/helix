@@ -79,6 +79,15 @@ impl DiffHandle {
         }
     }
 
+    /// Try to load the diff without blocking. Returns `None` if the diff worker
+    /// currently holds the write lock.
+    pub fn try_load(&self) -> Option<Diff<'_>> {
+        self.diff.try_read().map(|diff| Diff {
+            diff,
+            inverted: self.inverted,
+        })
+    }
+
     /// Updates the document associated with this redraw handle
     /// This function is only intended to be called from within the rendering loop
     /// if called from elsewhere it may fail to acquire the render lock and panic

@@ -46,7 +46,7 @@ use helix_core::{
 };
 use helix_view::{
     document::{FormatterError, Mode, SCRATCH_BUFFER_NAME},
-    editor::{Action, Motion},
+    editor::{Action, ConfigEvent, Motion},
     expansion,
     info::Info,
     input::KeyEvent,
@@ -521,6 +521,7 @@ impl MappableCommand {
         toggle_comments, "Comment/uncomment selections",
         toggle_line_comments, "Line comment/uncomment selections",
         toggle_block_comments, "Block comment/uncomment selections",
+        toggle_blame, "Toggle git blame for the current line",
         rotate_selections_forward, "Rotate selections forward",
         rotate_selections_backward, "Rotate selections backward",
         rotate_selection_contents_forward, "Rotate selection contents forward",
@@ -3691,6 +3692,17 @@ fn conflict_file_picker(cx: &mut Context) {
             }
         });
     cx.push_layer(Box::new(overlaid(picker)));
+}
+
+fn toggle_blame(cx: &mut Context) {
+    let config = cx.editor.config();
+    let mut new_config = (*config).clone();
+    new_config.blame = !new_config.blame;
+    let _ = cx
+        .editor
+        .config_events
+        .0
+        .send(ConfigEvent::Update(Box::new(new_config)));
 }
 
 fn recent_file_picker(cx: &mut Context) {

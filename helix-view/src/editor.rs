@@ -438,6 +438,8 @@ pub struct Config {
     /// Configuration for automatic file reloading on external changes.
     #[serde(default)]
     pub file_watcher: FileWatcherConfig,
+    /// Whether to show git blame information below the cursor line. Defaults to `false`.
+    pub blame: bool,
 }
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, Clone, Copy)]
@@ -1189,6 +1191,7 @@ impl Default for Config {
             buffer_picker: BufferPickerConfig::default(),
             insecure: false,
             file_watcher: FileWatcherConfig::default(),
+            blame: false,
         }
     }
 }
@@ -2108,6 +2111,7 @@ impl Editor {
                 doc.set_diff_base(diff_base);
             }
             doc.set_version_control_head(self.diff_providers.get_current_head_name(&path));
+            doc.set_blame(self.diff_providers.get_blame(&path));
 
             let id = self.new_document(doc);
             self.launch_language_servers(id);

@@ -61,6 +61,13 @@ tabstop = { modifiers = ["italic"], bg = "bossanova" }
 "ui.virtual.ruler" = { bg = "bossanova" }
 "ui.virtual.jump-label" = { fg = "apricot", modifiers = ["bold"] }
 
+"ui.blame" = { fg = "comet" }
+"ui.blame.background" = { bg = "twilight" }
+"ui.blame.commit" = { fg = "apricot", modifiers = ["bold"] }
+"ui.blame.author" = { fg = "lilac" }
+"ui.blame.time" = { fg = "comet", modifiers = ["dim"] }
+"ui.blame.summary" = { fg = "lavender" }
+
 "ui.virtual.indent-guide" = { fg = "comet" }
 
 "ui.selection" = { bg = "#540099" }

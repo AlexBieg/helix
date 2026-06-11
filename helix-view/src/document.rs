@@ -15,7 +15,7 @@ use helix_core::text_annotations::{InlineAnnotation, Overlay};
 use helix_event::TaskController;
 use helix_lsp::util::lsp_pos_to_pos;
 use helix_stdx::faccess::{copy_metadata, readonly};
-use helix_vcs::{DiffHandle, DiffProviderRegistry};
+use helix_vcs::{BlameEntry, DiffHandle, DiffProviderRegistry, Hunk};
 use once_cell::sync::OnceCell;
 use thiserror;
 
@@ -201,6 +201,8 @@ pub struct Document {
 
     diff_handle: Option<DiffHandle>,
     version_control_head: Option<Arc<ArcSwap<Box<str>>>>,
+    /// Blame entries indexed by editor line. `None` entries indicate uncommitted lines.
+    blame: Option<Vec<Option<BlameEntry>>>,
 
     // when document was used for most-recent-used buffer picker
     pub focused_at: std::time::Instant,
@@ -750,8 +752,9 @@ impl Document {
             modified_since_accessed: false,
             language_servers: HashMap::new(),
             diff_handle: None,
-            config,
             version_control_head: None,
+            blame: None,
+            config,
             focused_at: std::time::Instant::now(),
             readonly: false,
             jump_labels: HashMap::new(),
@@ -1303,6 +1306,7 @@ impl Document {
         }
 
         self.version_control_head = provider_registry.get_current_head_name(&path);
+        self.set_blame(provider_registry.get_blame(&path));
 
         Ok(())
     }
@@ -1988,6 +1992,54 @@ impl Document {
         version_control_head: Option<Arc<ArcSwap<Box<str>>>>,
     ) {
         self.version_control_head = version_control_head;
+    }
+
+    pub fn blame(&self) -> Option<&[Option<BlameEntry>]> {
+        self.blame.as_deref()
+    }
+
+    pub fn set_blame(&mut self, blame: Option<Vec<BlameEntry>>) {
+        self.blame = blame.map(|entries| {
+            // Extract hunks without holding the read lock during the full mapping pass.
+            let hunks: Option<Vec<Hunk>> = self.diff_handle.as_ref().and_then(|handle| {
+                let diff = handle.try_load()?;
+                let hunks: Vec<Hunk> = (0..diff.len())
+                    .map(|i| diff.nth_hunk(i))
+                    .filter(|h| *h != Hunk::NONE)
+                    .collect();
+                Some(hunks)
+            });
+            if let Some(hunks) = hunks {
+                let doc_lines = self.text.len_lines();
+                let mut mapped = Vec::with_capacity(doc_lines);
+                for editor_line in 0..doc_lines {
+                    let head_line = {
+                        let mut hl = editor_line as isize;
+                        for hunk in &hunks {
+                            let after_start = hunk.after.start as isize;
+                            let after_end = hunk.after.end as isize;
+                            if after_start > editor_line as isize {
+                                break;
+                            }
+                            if after_end > editor_line as isize {
+                                if hunk.before.is_empty() {
+                                    hl = -1;
+                                    break;
+                                }
+                                hl = hunk.before.start as isize;
+                                break;
+                            }
+                            hl += hunk.before.len() as isize - hunk.after.len() as isize;
+                        }
+                        if hl < 0 { None } else { Some(hl as usize) }
+                    };
+                    mapped.push(head_line.and_then(|hl| entries.get(hl).cloned()));
+                }
+                mapped
+            } else {
+                entries.into_iter().map(Some).collect()
+            }
+        });
     }
 
     #[inline]

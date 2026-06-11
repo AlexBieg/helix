@@ -1,6 +1,6 @@
 use crate::{
     align_view,
-    annotations::diagnostics::InlineDiagnostics,
+    annotations::{blame::BlameLineAnnotation, diagnostics::InlineDiagnostics},
     document::{DocumentColorSwatches, DocumentInlayHints},
     editor::{GutterConfig, GutterType},
     graphics::Rect,
@@ -513,6 +513,7 @@ impl View {
         let enable_cursor_line = self
             .diagnostics_handler
             .show_cursorline_diagnostics(doc, self.id);
+        let blame_enabled = config.blame;
         let config = config.inline_diagnostics.prepare(width, enable_cursor_line);
         if !config.disabled() {
             let cursor = doc
@@ -526,6 +527,14 @@ impl View {
                 doc.view_offset(self.id).horizontal_offset,
                 config,
             ));
+        }
+
+        if blame_enabled {
+            let cursor = doc
+                .selection(self.id)
+                .primary()
+                .cursor(doc.text().slice(..));
+            text_annotations.add_line_annotation(BlameLineAnnotation::new(doc, cursor));
         }
 
         text_annotations

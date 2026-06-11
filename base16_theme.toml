@@ -34,6 +34,13 @@
 "ui.virtual.jump-label" = { fg = "blue", modifiers = ["bold", "underlined"] }
 "ui.virtual.ruler" = { bg = "black" }
 
+"ui.blame" = { fg = "gray" }
+"ui.blame.background" = { bg = "black" }
+"ui.blame.commit" = { fg = "yellow", modifiers = ["bold"] }
+"ui.blame.author" = { fg = "blue" }
+"ui.blame.time" = { fg = "gray", modifiers = ["dim"] }
+"ui.blame.summary" = { fg = "white" }
+
 "markup.heading" = "blue"
 "markup.list" = "red"
 "markup.bold" = { fg = "yellow", modifiers = ["bold"] }
