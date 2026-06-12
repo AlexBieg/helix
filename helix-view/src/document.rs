@@ -1241,6 +1241,12 @@ impl Document {
         }
     }
 
+    /// The modification time of the file on disk as of the last time Helix read
+    /// or wrote it. A later on-disk mtime indicates an external change.
+    pub fn last_saved_time(&self) -> SystemTime {
+        self.last_saved_time
+    }
+
     pub fn pickup_last_saved_time(&mut self) {
         self.last_saved_time = match self.path() {
             Some(path) => match path.metadata() {

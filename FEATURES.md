@@ -9,6 +9,7 @@ Custom features added on top of upstream Helix.
 - Added `FileWatcherConfig` (`auto_reload`, `debounce_ms`) to editor config
 - Wired into `Editor` open/close lifecycle and `wait_event()` event loop
 - Auto-reloads clean buffers when files are modified externally
+- Only reacts to *external* changes: filesystem events caused by Helix's own save are ignored by comparing the file's on-disk mtime against the time of Helix's last write, so saving in the editor no longer shows a spurious "changed externally, reloaded" message (added 2026-06-12)
 - Shows status warning for dirty buffers instead of overwriting unsaved changes
 - Debounce support to prevent rapid successive reloads
 - Notifies LSP via `file_event_handler` on reload
@@ -81,3 +82,38 @@ Custom features added on top of upstream Helix.
 - Also available as mappable static commands: `resolve_conflict_keep_ours`, `resolve_conflict_keep_theirs`, `resolve_conflict_keep_both`
 - Core parsing: `ConflictRegion` struct and `find_conflict_regions()` scan a buffer for `<<<<<<<`/`=======`/`>>>>>>>` markers
 - Resolution replaces the entire conflict region (markers and all) with the chosen section via a single `Transaction::change`
+
+## 2026-06-12
+
+### Popup notifications (toasts)
+- Status, warning, and error messages now appear as color-coded popups ("toasts") stacked in the top-right corner, in addition to being mirrored on the status line
+- Severity-scaled auto-dismiss (hint 2s, info 3s, warning 5s, error sticky by default); identical consecutive messages coalesce with a `(×N)` counter; the stack collapses to a `+N more` indicator past `max-visible`
+- Dismiss without leaving your current mode: `Space N` (`dismiss_notifications`) clears the stack, `dismiss_notification` clears the most recent (unbound by default), or click a toast to close it
+- `:notify [-s|--severity hint|info|warning|error] [-r|--repeat N] <message>` shows a notification by hand (handy for testing and theming; `\n` in the message wraps to multiple lines)
+- Styled via `ui.notification` / `ui.notification.{error,warning,info,hint}`, falling back to `ui.popup` and the existing severity scopes
+- Auto-dismiss uses a single scheduled wake (`Editor::request_redraw_at`) rather than busy-polling, so the editor stays idle between toasts
+- Config:
+  ```toml
+  [editor.notifications]
+  enable = true
+  max-visible = 5
+  animate = true
+  # 0 = sticky (dismiss manually)
+  timeout = { hint = 2000, info = 3000, warning = 5000, error = 0 }
+  ```
+
+### UI entrance animations
+- Added a small shared `ui::animation` module: eased entrance progress and an RGB color `blend`, driven purely by elapsed time (per-frame redraws only while animating, then idle)
+- **Notifications** slide in horizontally and slide out + dim as they leave; dismissing fades a toast out rather than making it vanish
+- **Pickers** play a brief entrance animation when they open, configurable via `editor.picker-animation`:
+  - `none` — no animation
+  - `unfold` — grow from one row down to full height
+  - `unfold-horizontal` — grow from the center out to full width
+  - `unfold-both` — grow from the center out in both dimensions, a zoom/iris (default)
+  - `cascade` — reveal result rows top-to-bottom
+- The picker unfolds and cascade animate geometry, so they are theme-independent; only color-based effects (the notification fade) require RGB theme colors and degrade gracefully on named/indexed palettes
+- Config:
+  ```toml
+  [editor]
+  picker-animation = "unfold-both"   # none | unfold | unfold-horizontal | unfold-both | cascade
+  ```

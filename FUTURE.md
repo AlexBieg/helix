@@ -33,14 +33,6 @@ Save and restore editor state across restarts.
 - Path canonicalization needed for consistent hashing across relative vs absolute path forms
 - Started in `helix-view/src/session.rs` (reverted), integration test in `helix-term/tests/test/session.rs` (reverted)
 
-## Popup Notifications
-
-Short-term popup toasts to replace single-line-only status messages: top-right
-stacking, severity colors, auto-dismiss + click/keybind dismissal, subtle
-slide/fade animation.
-
-See [docs/notifications-design.md](docs/notifications-design.md) for the full design.
-
 ## Minimap
 - Maybe, the scroll bard did a lot of that work for me
 

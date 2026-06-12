@@ -691,6 +691,22 @@ impl Application {
                     return false;
                 }
 
+                // Ignore the event if the file on disk is no newer than Helix's
+                // own last write to it: the change was caused by us saving, not
+                // by an external process. An external write bumps the mtime past
+                // the time we recorded when we last read/wrote the file.
+                if let Some(doc) = self.editor.documents.get(&doc_id) {
+                    if let Some(mtime) = doc
+                        .path()
+                        .and_then(|path| path.metadata().ok())
+                        .and_then(|metadata| metadata.modified().ok())
+                    {
+                        if mtime <= doc.last_saved_time() {
+                            return false;
+                        }
+                    }
+                }
+
                 // Debounce: skip if we recently processed a change for this document
                 let debounce = std::time::Duration::from_millis(file_watcher_config.debounce_ms);
                 let now = Instant::now();
