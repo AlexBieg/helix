@@ -160,6 +160,7 @@ The following statusline elements can be configured:
 | `spacer` | Inserts a space between elements (multiple/contiguous spacers may be specified) |
 | `version-control` | The current branch name or detached commit hash of the opened workspace |
 | `register` | The current selected register |
+| `search-count` | The current search match position and total (e.g. `[3/12]`), shown while a search is active and updated as you navigate with `n`/`N` |
 
 ### `[editor.lsp]` Section
 

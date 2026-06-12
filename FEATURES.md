@@ -117,3 +117,10 @@ Custom features added on top of upstream Helix.
   [editor]
   picker-animation = "unfold-both"   # none | unfold | unfold-horizontal | unfold-both | cascade
   ```
+
+### Search match counter in the statusline
+- New `search-count` statusline element shows the current search match position and total, e.g. `[3/12]`, like vim's search count
+- Updates as you navigate matches with `n`/`N`, and live while typing a `/` search; shows nothing when no search is active or a search has no matches
+- Computed in `search_impl` (the single routine all search paths flow through) and stored in `Editor::search_match_count`; the position math lives in the pure, unit-tested `search_match_position` helper
+- Add it to any statusline section, e.g. `[editor.statusline] center = ["search-count"]`
+- Known limitation: the count refreshes on search navigation, not on plain cursor moves or edits, so it can read stale until the next `n`/`N` or search

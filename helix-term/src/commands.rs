@@ -2352,6 +2352,32 @@ fn search_impl(
         doc.set_selection(view.id, selection);
         view.ensure_cursor_in_view_center(doc, scrolloff);
     };
+
+    // Update the search match counter shown by the `SearchCount` statusline element.
+    let (view, doc) = current_ref!(editor);
+    let text = doc.text().slice(..);
+    let from = doc.selection(view.id).primary().from();
+    editor.search_match_count = search_match_position(text, regex, from);
+}
+
+/// The 1-based index of the search match at or after `from_char`, paired with
+/// the total number of matches. `None` when there are no matches. Drives the
+/// `SearchCount` statusline element.
+fn search_match_position(
+    text: RopeSlice,
+    regex: &rope::Regex,
+    from_char: usize,
+) -> Option<(usize, usize)> {
+    let from = text.char_to_byte(from_char);
+    let mut total = 0;
+    let mut current = None;
+    for mat in regex.find_iter(text.regex_input()) {
+        total += 1;
+        if current.is_none() && mat.start() >= from {
+            current = Some(total);
+        }
+    }
+    (total > 0).then(|| (current.unwrap_or(total), total))
 }
 
 fn search_completions(cx: &mut Context, reg: Option<char>) -> Vec<String> {
@@ -7736,5 +7762,47 @@ fn lsp_or_syntax_workspace_symbol_picker(cx: &mut Context) {
         lsp::workspace_symbol_picker(cx);
     } else {
         syntax_workspace_symbol_picker(cx);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use helix_core::Rope;
+
+    fn position(text: &str, pattern: &str, from_char: usize) -> Option<(usize, usize)> {
+        let rope = Rope::from(text);
+        let regex = rope::RegexBuilder::new().build(pattern).unwrap();
+        search_match_position(rope.slice(..), &regex, from_char)
+    }
+
+    #[test]
+    fn search_match_position_counts_and_indexes() {
+        // "foo" at byte offsets 0, 8, 16.
+        let text = "foo bar foo baz foo";
+        assert_eq!(position(text, "foo", 0), Some((1, 3)));
+        // Cursor on the second match.
+        assert_eq!(position(text, "foo", 8), Some((2, 3)));
+        // Cursor on the third match.
+        assert_eq!(position(text, "foo", 16), Some((3, 3)));
+    }
+
+    #[test]
+    fn search_match_position_rounds_up_to_next_match() {
+        let text = "foo bar foo";
+        // Cursor between matches reports the upcoming one.
+        assert_eq!(position(text, "foo", 4), Some((2, 2)));
+    }
+
+    #[test]
+    fn search_match_position_past_last_match_reports_last() {
+        let text = "foo bar foo baz";
+        // Cursor after the final match: no match at/after it, falls back to total.
+        assert_eq!(position(text, "foo", 12), Some((2, 2)));
+    }
+
+    #[test]
+    fn search_match_position_no_matches_is_none() {
+        assert_eq!(position("hello world", "zzz", 0), None);
     }
 }

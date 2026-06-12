@@ -157,6 +157,16 @@ where
         helix_view::editor::StatusLineElement::VersionControl => render_version_control,
         helix_view::editor::StatusLineElement::Register => render_register,
         helix_view::editor::StatusLineElement::CurrentWorkingDirectory => render_cwd,
+        helix_view::editor::StatusLineElement::SearchCount => render_search_count,
+    }
+}
+
+fn render_search_count<'a, F>(context: &mut RenderContext<'a>, write: F)
+where
+    F: Fn(&mut RenderContext<'a>, Span<'a>) + Copy,
+{
+    if let Some((current, total)) = context.editor.search_match_count {
+        write(context, format!(" [{current}/{total}] ").into());
     }
 }
 

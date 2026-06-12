@@ -815,6 +815,10 @@ pub enum StatusLineElement {
 
     /// The base of current working directory
     CurrentWorkingDirectory,
+
+    /// The current search match position and total, e.g. `[3/12]`. Only shown
+    /// while a search is active; updates as you navigate with `n`/`N`.
+    SearchCount,
 }
 
 // Cursor shape is read and used on every rendered frame and so needs
@@ -1349,6 +1353,9 @@ pub struct Editor {
     pub last_selection: Option<Selection>,
 
     pub status_msg: Option<(Cow<'static, str>, Severity)>,
+    /// Current search match position and total `(current, total)`, for the
+    /// `SearchCount` statusline element. Recomputed on each search navigation.
+    pub search_match_count: Option<(usize, usize)>,
     pub notifications: Notifications,
     pub autoinfo: Option<Info>,
 
@@ -1513,6 +1520,7 @@ impl Editor {
                 |config: &Config| &config.clipboard_provider,
             ))),
             status_msg: None,
+            search_match_count: None,
             notifications: Notifications::default(),
             autoinfo: None,
             idle_timer: Box::pin(sleep(conf.idle_timeout)),
