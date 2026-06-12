@@ -1,0 +1,31 @@
+FEATURES.md
+  s_9b08ed704346ee::t_263a0f3b1fd9ee 127-150
+book/src/themes.md
+  s_9b08ed704346ee::t_263a0f3b1fd9ee 332
+helix-term/src/ui/editor.rs
+  s_9b08ed704346ee::t_263a0f3b1fd9ee 306,309
+helix-view/src/editor.rs
+  s_9b08ed704346ee::t_263a0f3b1fd9ee 695-697,704-723,744,2469-2472
+book/src/editor.md
+  s_9b08ed704346ee::t_263a0f3b1fd9ee 129,143,166-184
+helix-term/src/ui/statusline.rs
+  s_9b08ed704346ee::t_263a0f3b1fd9ee 60,62-78,80-89,91-106,114-115,121,129-130,136,147,151-152,494-511,515-555,640-641,682-731
+helix-view/src/view.rs
+  s_9b08ed704346ee::t_263a0f3b1fd9ee 149-151,196,215-217,221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "ef80e651dd6fe9f32b9dbfdfc98a832383b19868",
+  "prompts": {},
+  "sessions": {
+    "s_9b08ed704346ee": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "109b07a4-9233-4387-97db-a41b195fd4ef",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Alex Bieg <alexbieg-hw@users.noreply.github.com>"
+    }
+  }
+}
