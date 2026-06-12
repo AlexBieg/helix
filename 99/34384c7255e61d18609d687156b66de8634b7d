@@ -1,0 +1,27 @@
+helix-view/src/editor.rs
+  s_d4ca5cbe5aa6fc::t_dce976f2b96e73 818-821,1356-1358,1523
+FEATURES.md
+  s_d4ca5cbe5aa6fc::t_dce976f2b96e73 120-126
+book/src/editor.md
+  s_d4ca5cbe5aa6fc::t_dce976f2b96e73 163
+helix-term/src/commands.rs
+  s_d4ca5cbe5aa6fc::t_dce976f2b96e73 2355-2380,7767-7806
+helix-term/src/ui/statusline.rs
+  s_d4ca5cbe5aa6fc::t_dce976f2b96e73 160-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "9934384c7255e61d18609d687156b66de8634b7d",
+  "prompts": {},
+  "sessions": {
+    "s_d4ca5cbe5aa6fc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11387119-c031-46f1-886d-c9ec4c13d586",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Alex Bieg <alexbieg-hw@users.noreply.github.com>"
+    }
+  }
+}
