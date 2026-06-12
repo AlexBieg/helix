@@ -444,6 +444,26 @@ pub struct Config {
     /// Transient popup notification ("toast") behavior.
     #[serde(default)]
     pub notifications: NotificationConfig,
+    /// Entrance animation played when a picker opens.
+    #[serde(default)]
+    pub picker_animation: PickerAnimation,
+}
+
+/// Entrance animation played when a picker opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum PickerAnimation {
+    /// No animation.
+    None,
+    /// Grow from one row down to full height.
+    Unfold,
+    /// Grow from the center out to full width.
+    UnfoldHorizontal,
+    /// Grow from the center out in both dimensions (zoom/iris).
+    #[default]
+    UnfoldBoth,
+    /// Reveal result rows top-to-bottom.
+    Cascade,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -1258,6 +1278,7 @@ impl Default for Config {
             file_watcher: FileWatcherConfig::default(),
             blame: false,
             notifications: NotificationConfig::default(),
+            picker_animation: PickerAnimation::default(),
         }
     }
 }

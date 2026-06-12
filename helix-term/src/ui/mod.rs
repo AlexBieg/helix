@@ -1,3 +1,4 @@
+pub mod animation;
 mod completion;
 mod document;
 pub(crate) mod editor;

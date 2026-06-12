@@ -45,13 +45,55 @@ use helix_core::{
     text_annotations::TextAnnotations, unicode::segmentation::UnicodeSegmentation, Position, Rope,
 };
 use helix_view::{
-    editor::Action,
+    editor::{Action, PickerAnimation},
     graphics::{CursorKind, Margin, Modifier, Rect},
     input::MouseEventKind,
     theme::Style,
     view::ViewPosition,
     Document, DocumentId, Editor,
 };
+
+use super::animation;
+
+/// The sub-rect a picker should render into for its entrance animation, given
+/// the eased `progress` in `[0, 1]`. Returns the full `area` once settled or
+/// when the style doesn't transform geometry.
+fn entrance_area(style: PickerAnimation, area: Rect, progress: f32) -> Rect {
+    if progress >= 1.0 {
+        return area;
+    }
+
+    // Interpolate a dimension from 1 up to its full extent.
+    let grow = |full: u16| 1 + (f32::from(full.saturating_sub(1)) * progress).round() as u16;
+
+    match style {
+        PickerAnimation::Unfold => {
+            // Grow from one row down to full height.
+            area.with_height(grow(area.height).min(area.height))
+        }
+        PickerAnimation::UnfoldHorizontal => {
+            // Grow from the horizontal center out to full width.
+            let width = grow(area.width).min(area.width);
+            let x = area.x + (area.width - width) / 2;
+            Rect::new(x, area.y, width, area.height)
+        }
+        PickerAnimation::UnfoldBoth => {
+            // Grow from the center out in both dimensions (zoom/iris).
+            let width = grow(area.width).min(area.width);
+            let height = grow(area.height).min(area.height);
+            let x = area.x + (area.width - width) / 2;
+            let y = area.y + (area.height - height) / 2;
+            Rect::new(x, y, width, height)
+        }
+        PickerAnimation::Cascade | PickerAnimation::None => area,
+    }
+}
+
+/// Number of result rows to reveal for the cascade animation: rows fill in
+/// top-to-bottom as `progress` advances.
+fn cascade_rows(height: u16, progress: f32) -> u16 {
+    ((f32::from(height) * progress).ceil() as u16).min(height)
+}
 
 use self::handlers::{DynamicQueryChange, DynamicQueryHandler, PreviewHighlightHandler};
 
@@ -290,6 +332,8 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     preview_area: Rect,
     /// Last cursor position used to detect selection changes
     last_preview_cursor: u32,
+    /// When the picker first rendered, for the entrance animation.
+    first_rendered: Option<std::time::Instant>,
 }
 
 impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
@@ -420,6 +464,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             preview_height: 0,
             preview_area: Rect::default(),
             last_preview_cursor: u32::MAX,
+            first_rendered: None,
         }
     }
 
@@ -749,6 +794,15 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         }
     }
 
+    /// Entrance-animation progress in `[0, 1]` (eased), `1.0` once settled.
+    fn entrance_progress(&self) -> f32 {
+        animation::ease_out_cubic(animation::entrance_progress(
+            self.first_rendered,
+            std::time::Instant::now(),
+            animation::ENTRANCE,
+        ))
+    }
+
     fn render_picker(&mut self, area: Rect, surface: &mut Surface, cx: &mut Context) {
         let status = self.matcher.tick(10);
         let snapshot = self.matcher.snapshot();
@@ -936,6 +990,13 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         }
 
         use tui::widgets::TableState;
+
+        // Cascade: reveal result rows top-to-bottom by growing the list height.
+        let inner = if cx.editor.config().picker_animation == PickerAnimation::Cascade {
+            inner.with_height(cascade_rows(inner.height, self.entrance_progress()))
+        } else {
+            inner
+        };
 
         table.render_table(
             inner,
@@ -1127,6 +1188,16 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
         // |preview  |
         // |         |
         // +---------+
+
+        // Drive the entrance animation: record first paint, keep frames coming
+        // until it settles.
+        let animation = cx.editor.config().picker_animation;
+        self.first_rendered.get_or_insert(std::time::Instant::now());
+        let progress = self.entrance_progress();
+        if animation != PickerAnimation::None && progress < 1.0 {
+            helix_event::request_redraw();
+        }
+        let area = entrance_area(animation, area, progress);
 
         let render_preview = self.show_preview
             && self.file_fn.is_some()
@@ -1333,3 +1404,89 @@ impl<T: 'static + Send + Sync, D> Drop for Picker<T, D> {
 }
 
 type PickerCallback<T> = Box<dyn Fn(&mut Context, &T, Action)>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const AREA: Rect = Rect {
+        x: 10,
+        y: 4,
+        width: 80,
+        height: 20,
+    };
+
+    #[test]
+    fn entrance_settles_to_full_area() {
+        for style in [
+            PickerAnimation::None,
+            PickerAnimation::Unfold,
+            PickerAnimation::UnfoldHorizontal,
+            PickerAnimation::UnfoldBoth,
+            PickerAnimation::Cascade,
+        ] {
+            assert_eq!(entrance_area(style, AREA, 1.0), AREA);
+        }
+    }
+
+    #[test]
+    fn none_and_cascade_do_not_transform_geometry() {
+        assert_eq!(entrance_area(PickerAnimation::None, AREA, 0.3), AREA);
+        assert_eq!(entrance_area(PickerAnimation::Cascade, AREA, 0.3), AREA);
+    }
+
+    #[test]
+    fn unfold_grows_height_from_the_top() {
+        let r = entrance_area(PickerAnimation::Unfold, AREA, 0.5);
+        // x/y/width unchanged; anchored at the top edge.
+        assert_eq!((r.x, r.y, r.width), (AREA.x, AREA.y, AREA.width));
+        // height = 1 + (20 - 1) * 0.5 = 10.5 -> 11
+        assert_eq!(r.height, 11);
+    }
+
+    #[test]
+    fn unfold_horizontal_grows_width_from_center() {
+        let r = entrance_area(PickerAnimation::UnfoldHorizontal, AREA, 0.5);
+        // width = 1 + (80 - 1) * 0.5 = 40.5 -> 41
+        assert_eq!(r.width, 41);
+        assert_eq!(r.height, AREA.height);
+        // centered: x = 10 + (80 - 41) / 2 = 29
+        assert_eq!(r.x, 29);
+        assert_eq!(r.y, AREA.y);
+    }
+
+    #[test]
+    fn unfold_both_grows_and_centers_in_both_axes() {
+        let r = entrance_area(PickerAnimation::UnfoldBoth, AREA, 0.5);
+        assert_eq!(r.width, 41); // 1 + 79*0.5 -> 41
+        assert_eq!(r.height, 11); // 1 + 19*0.5 -> 11
+        assert_eq!(r.x, 29); // 10 + (80-41)/2
+        assert_eq!(r.y, 8); // 4 + (20-11)/2
+    }
+
+    #[test]
+    fn entrance_stays_within_bounds_across_progress() {
+        for style in [
+            PickerAnimation::Unfold,
+            PickerAnimation::UnfoldHorizontal,
+            PickerAnimation::UnfoldBoth,
+        ] {
+            for step in 0..=10 {
+                let r = entrance_area(style, AREA, step as f32 / 10.0);
+                assert!(r.width >= 1 && r.width <= AREA.width);
+                assert!(r.height >= 1 && r.height <= AREA.height);
+                assert!(r.x >= AREA.x && r.right() <= AREA.right());
+                assert!(r.y >= AREA.y && r.bottom() <= AREA.bottom());
+            }
+        }
+    }
+
+    #[test]
+    fn cascade_reveals_rows_over_time() {
+        assert_eq!(cascade_rows(20, 0.0), 0);
+        assert_eq!(cascade_rows(20, 0.5), 10);
+        assert_eq!(cascade_rows(20, 1.0), 20);
+        // Never exceeds the available height even past the end.
+        assert_eq!(cascade_rows(20, 1.5), 20);
+    }
+}
