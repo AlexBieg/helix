@@ -57,13 +57,53 @@ pub fn render(context: &mut RenderContext, viewport: Rect, surface: &mut Surface
         context.editor.theme.get("ui.statusline.inactive")
     };
 
-    surface.set_style(viewport.with_height(1), base_style);
-
-    // Left side of the status line.
-
     let config = context.editor.config();
 
-    for element_id in &config.statusline.left {
+    // The main row sits at the bottom of the viewport (closest to the commandline).
+    let main_row = viewport
+        .clip_top(viewport.height.saturating_sub(1))
+        .with_height(1);
+
+    if let Some(second) = &config.statusline.second_row {
+        let top_row = viewport.with_height(1);
+        render_row(
+            context,
+            surface,
+            base_style,
+            top_row,
+            &second.left,
+            &second.center,
+            &second.right,
+        );
+    }
+
+    render_row(
+        context,
+        surface,
+        base_style,
+        main_row,
+        &config.statusline.left,
+        &config.statusline.center,
+        &config.statusline.right,
+    );
+}
+
+/// Lay out a single statusline row's left/center/right zones into `row` (height 1).
+fn render_row(
+    context: &mut RenderContext,
+    surface: &mut Surface,
+    base_style: Style,
+    row: Rect,
+    left: &[StatusLineElementID],
+    center: &[StatusLineElementID],
+    right: &[StatusLineElementID],
+) {
+    context.parts = RenderBuffer::default();
+
+    surface.set_style(row, base_style);
+
+    // Left side of the status line.
+    for element_id in left {
         let render = get_render_function(*element_id);
         (render)(context, |context, span| {
             append(&mut context.parts.left, span, base_style)
@@ -71,15 +111,14 @@ pub fn render(context: &mut RenderContext, viewport: Rect, surface: &mut Surface
     }
 
     surface.set_spans(
-        viewport.x,
-        viewport.y,
+        row.x,
+        row.y,
         &context.parts.left,
         context.parts.left.width() as u16,
     );
 
     // Right side of the status line.
-
-    for element_id in &config.statusline.right {
+    for element_id in right {
         let render = get_render_function(*element_id);
         (render)(context, |context, span| {
             append(&mut context.parts.right, span, base_style)
@@ -87,18 +126,14 @@ pub fn render(context: &mut RenderContext, viewport: Rect, surface: &mut Surface
     }
 
     surface.set_spans(
-        viewport.x
-            + viewport
-                .width
-                .saturating_sub(context.parts.right.width() as u16),
-        viewport.y,
+        row.x + row.width.saturating_sub(context.parts.right.width() as u16),
+        row.y,
         &context.parts.right,
         context.parts.right.width() as u16,
     );
 
     // Center of the status line.
-
-    for element_id in &config.statusline.center {
+    for element_id in center {
         let render = get_render_function(*element_id);
         (render)(context, |context, span| {
             append(&mut context.parts.center, span, base_style)
@@ -109,12 +144,12 @@ pub fn render(context: &mut RenderContext, viewport: Rect, surface: &mut Surface
     let spacing = 1u16;
 
     let edge_width = context.parts.left.width().max(context.parts.right.width()) as u16;
-    let center_max_width = viewport.width.saturating_sub(2 * edge_width + 2 * spacing);
+    let center_max_width = row.width.saturating_sub(2 * edge_width + 2 * spacing);
     let center_width = center_max_width.min(context.parts.center.width() as u16);
 
     surface.set_spans(
-        viewport.x + viewport.width / 2 - center_width / 2,
-        viewport.y,
+        row.x + row.width / 2 - center_width / 2,
+        row.y,
         &context.parts.center,
         center_width,
     );
@@ -456,16 +491,66 @@ fn render_file_name<'a, F>(context: &mut RenderContext<'a>, write: F)
 where
     F: Fn(&mut RenderContext<'a>, Span<'a>) + Copy,
 {
-    let title = {
-        let rel_path = context.doc.relative_path();
-        let path = rel_path
-            .as_ref()
-            .map(|p| p.to_string_lossy())
-            .unwrap_or_else(|| SCRATCH_BUFFER_NAME.into());
-        format!(" {} ", path)
-    };
+    let path = context
+        .doc
+        .relative_path()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| SCRATCH_BUFFER_NAME.to_string());
 
+    // The statusline spans the full view width. Give the path whatever room is
+    // left after the elements already placed on this row, with a one-column gap
+    // before the neighbour and two columns for the surrounding spaces. Only then
+    // do we abbreviate — a path that fits is shown in full.
+    let consumed = context.parts.left.width()
+        + context.parts.center.width()
+        + context.parts.right.width();
+    let budget = (context.view.area.width as usize)
+        .saturating_sub(consumed + 1)
+        .saturating_sub(2);
+
+    let title = format!(" {} ", fit_path(&path, budget));
     write(context, title.into());
+}
+
+/// Shorten `path` to fit within `budget` display columns by abbreviating leading
+/// path components fish-style (topmost first), keeping the file name intact. A
+/// path that already fits is returned unchanged.
+fn fit_path(path: &str, budget: usize) -> String {
+    if path.width() <= budget {
+        return path.to_string();
+    }
+
+    let segments: Vec<&str> = path.split(std::path::MAIN_SEPARATOR).collect();
+    if segments.len() <= 1 {
+        return path.to_string(); // bare file name, nothing to abbreviate
+    }
+
+    let mut parts: Vec<String> = segments.iter().map(|s| (*s).to_string()).collect();
+    let last = parts.len() - 1;
+    for i in 0..last {
+        if parts.join(std::path::MAIN_SEPARATOR_STR).width() <= budget {
+            break;
+        }
+        parts[i] = abbreviate_segment(segments[i]);
+    }
+    parts.join(std::path::MAIN_SEPARATOR_STR)
+}
+
+/// First "letter" of a path segment, keeping a leading dot for hidden entries
+/// (`.config` -> `.c`), fish-shell style.
+fn abbreviate_segment(segment: &str) -> String {
+    let mut chars = segment.chars();
+    match chars.next() {
+        Some('.') => {
+            let mut out = String::from(".");
+            if let Some(c) = chars.next() {
+                out.push(c);
+            }
+            out
+        }
+        Some(c) => c.to_string(),
+        None => String::new(),
+    }
 }
 
 fn render_file_absolute_path<'a, F>(context: &mut RenderContext<'a>, write: F)
@@ -552,7 +637,8 @@ where
         .unwrap_or_default()
         .to_string();
 
-    write(context, head.into());
+    let style = context.editor.theme.get("ui.statusline.version-control");
+    write(context, Span::styled(head, style));
 }
 
 fn render_register<'a, F>(context: &mut RenderContext<'a>, write: F)
@@ -592,4 +678,55 @@ where
         .to_string_lossy()
         .to_string();
     write(context, cwd.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{abbreviate_segment, fit_path};
+    use std::path::MAIN_SEPARATOR_STR as SEP;
+
+    fn p(segments: &[&str]) -> String {
+        segments.join(SEP)
+    }
+
+    #[test]
+    fn full_path_kept_when_it_fits() {
+        let path = p(&["helix-term", "src", "ui", "editor.rs"]);
+        assert_eq!(fit_path(&path, 100), path);
+    }
+
+    #[test]
+    fn abbreviates_topmost_first_until_it_fits() {
+        let path = p(&["helix-term", "src", "ui", "editor.rs"]);
+        // Enough room once only the first component is abbreviated.
+        let expected = p(&["h", "src", "ui", "editor.rs"]);
+        assert_eq!(fit_path(&path, expected.chars().count()), expected);
+    }
+
+    #[test]
+    fn abbreviates_all_ancestors_when_very_tight() {
+        let path = p(&["helix-term", "src", "ui", "editor.rs"]);
+        let expected = p(&["h", "s", "u", "editor.rs"]);
+        assert_eq!(fit_path(&path, expected.chars().count()), expected);
+    }
+
+    #[test]
+    fn file_name_is_never_abbreviated() {
+        let path = p(&["a", "very-long-file-name.rs"]);
+        // Budget smaller than the file name itself: ancestors collapse, name stays.
+        let result = fit_path(&path, 3);
+        assert_eq!(result, p(&["a", "very-long-file-name.rs"]));
+    }
+
+    #[test]
+    fn bare_file_name_is_untouched() {
+        assert_eq!(fit_path("editor.rs", 2), "editor.rs");
+    }
+
+    #[test]
+    fn hidden_segments_keep_leading_dot() {
+        assert_eq!(abbreviate_segment(".config"), ".c");
+        assert_eq!(abbreviate_segment("src"), "s");
+        assert_eq!(abbreviate_segment("."), ".");
+    }
 }

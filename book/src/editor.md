@@ -126,6 +126,7 @@ The `[editor.statusline]` key takes the following sub-keys:
 | `left`        | A list of elements aligned to the left of the statusline | `["mode", "spinner", "file-name", "read-only-indicator", "file-modification-indicator"]` |
 | `center`      | A list of elements aligned to the middle of the statusline | `[]` |
 | `right`       | A list of elements aligned to the right of the statusline | `["diagnostics", "selections", "register", "position", "file-encoding"]` |
+| `second-row`  | An optional extra statusline row rendered directly above the main row (see [Multiple rows](#multiple-statusline-rows)) | _unset_ |
 | `separator`   | The character used to separate elements in the statusline | `"│"` |
 | `mode.normal` | The text shown in the `mode` element for normal mode | `"NOR"` |
 | `mode.insert` | The text shown in the `mode` element for insert mode | `"INS"` |
@@ -139,7 +140,7 @@ The following statusline elements can be configured:
 | ------ | ----------- |
 | `mode` | The current editor mode (`mode.normal`/`mode.insert`/`mode.select`) |
 | `spinner` | A progress spinner indicating LSP activity |
-| `file-name` | The path/name of the opened file |
+| `file-name` | The path/name of the opened file. When the row runs out of room, leading directories are abbreviated fish-style (topmost first, e.g. `h/s/ui/editor.rs`) just enough to fit; the file name is never shortened |
 | `file-absolute-path` | The absolute path/name of the opened file |
 | `file-base-name` | The basename of the opened file |
 | `current-working-directory` | The current working directory  |
@@ -161,6 +162,26 @@ The following statusline elements can be configured:
 | `version-control` | The current branch name or detached commit hash of the opened workspace |
 | `register` | The current selected register |
 | `search-count` | The current search match position and total (e.g. `[3/12]`), shown while a search is active and updated as you navigate with `n`/`N` |
+
+#### Multiple statusline rows
+
+By default the statusline is a single row. The optional `second-row` lets you spread elements out when the default row gets crowded — useful when long elements such as `version-control` and `file-name` compete for space. It adds a per-view row directly above the main statusline row (each split gets its own) and costs one row of document height.
+
+`second-row` takes the same `left`/`center`/`right` sub-keys as the main row. Omit a key entirely and that row is not rendered (no leftover gap), so single-row setups are unchanged.
+
+```toml
+[editor.statusline]
+left = ["mode", "spinner", "diagnostics"]
+center = ["search-count"]
+right = ["position-percentage"]
+
+# A row above the main row for the branch name and file path.
+[editor.statusline.second-row]
+left = ["version-control"]
+center = ["file-name"]
+```
+
+The `version-control` element can be given its own color with the `ui.statusline.version-control` theme key (see [Themes](./themes.md)).
 
 ### `[editor.lsp]` Section
 

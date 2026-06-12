@@ -692,10 +692,33 @@ pub struct StatusLineConfig {
     pub left: Vec<StatusLineElement>,
     pub center: Vec<StatusLineElement>,
     pub right: Vec<StatusLineElement>,
+    /// When set, an additional statusline row is rendered above the main row.
+    /// Costs one extra row of document height.
+    pub second_row: Option<StatusLineRow>,
     pub separator: String,
     pub mode: ModeConfig,
     pub diagnostics: Vec<Severity>,
     pub workspace_diagnostics: Vec<Severity>,
+}
+
+impl StatusLineConfig {
+    /// Number of rows the statusline occupies (1, or 2 when a second row is configured).
+    pub fn height(&self) -> u16 {
+        if self.second_row.is_some() {
+            2
+        } else {
+            1
+        }
+    }
+}
+
+/// Element layout for an additional statusline row.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
+pub struct StatusLineRow {
+    pub left: Vec<StatusLineElement>,
+    pub center: Vec<StatusLineElement>,
+    pub right: Vec<StatusLineElement>,
 }
 
 impl Default for StatusLineConfig {
@@ -718,6 +741,7 @@ impl Default for StatusLineConfig {
                 E::Position,
                 E::FileEncoding,
             ],
+            second_row: None,
             separator: String::from("│"),
             mode: ModeConfig::default(),
             diagnostics: vec![Severity::Warning, Severity::Error],
@@ -2442,6 +2466,10 @@ impl Editor {
     }
 
     pub fn resize(&mut self, area: Rect) {
+        let statusline_height = self.config().statusline.height();
+        for (view, _) in self.tree.views_mut() {
+            view.statusline_height = statusline_height;
+        }
         if self.tree.resize(area) {
             self._refresh();
         };

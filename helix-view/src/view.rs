@@ -146,6 +146,9 @@ pub struct ViewPosition {
 pub struct View {
     pub id: ViewId,
     pub area: Rect,
+    /// Number of rows reserved for the statusline at the bottom of `area`.
+    /// Kept in sync with the statusline config by `Editor::resize`.
+    pub statusline_height: u16,
     pub doc: DocumentId,
     pub jumps: JumpList,
     // documents accessed from this view from the oldest one to last viewed one
@@ -190,6 +193,7 @@ impl View {
             id: ViewId::default(),
             doc,
             area: Rect::default(), // will get calculated upon inserting into tree
+            statusline_height: 1,
             jumps: JumpList::new((doc, Selection::point(0))), // TODO: use actual sel
             docs_access_history: Vec::new(),
             last_modified_docs: [None, None],
@@ -208,11 +212,13 @@ impl View {
     }
 
     pub fn inner_area(&self, doc: &Document) -> Rect {
-        self.area.clip_left(self.gutter_offset(doc)).clip_bottom(1) // -1 for statusline
+        self.area
+            .clip_left(self.gutter_offset(doc))
+            .clip_bottom(self.statusline_height) // reserve statusline row(s)
     }
 
     pub fn inner_height(&self) -> usize {
-        self.area.clip_bottom(1).height.into() // -1 for statusline
+        self.area.clip_bottom(self.statusline_height).height.into() // reserve statusline row(s)
     }
 
     pub fn inner_width(&self, doc: &Document) -> u16 {

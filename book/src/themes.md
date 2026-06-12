@@ -329,6 +329,7 @@ These scopes are used for theming the editor interface:
 | `ui.statusline.insert`            | Statusline mode during insert mode ([only if `editor.color-modes` is enabled][editor-section]) |
 | `ui.statusline.select`            | Statusline mode during select mode ([only if `editor.color-modes` is enabled][editor-section]) |
 | `ui.statusline.separator`         | Separator character in statusline                                                              |
+| `ui.statusline.version-control`   | The `version-control` element (branch name); falls back to `ui.statusline` if unset            |
 | `ui.bufferline`                   | Style for the buffer line                                                                      |
 | `ui.bufferline.active`            | Style for the active buffer in buffer line                                                     |
 | `ui.bufferline.background`        | Style for bufferline background                                                                |

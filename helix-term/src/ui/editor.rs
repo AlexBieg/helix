@@ -303,10 +303,10 @@ impl EditorView {
             Self::render_diagnostics(doc, view, inner, surface, theme);
         }
 
+        let statusline_height = config.statusline.height();
         let statusline_area = view
             .area
-            .clip_top(view.area.height.saturating_sub(1))
-            .clip_bottom(1); // -1 from bottom to remove commandline
+            .clip_top(view.area.height.saturating_sub(statusline_height));
 
         let mut context =
             statusline::RenderContext::new(editor, doc, view, is_focused, &self.spinners);

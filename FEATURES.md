@@ -124,3 +124,27 @@ Custom features added on top of upstream Helix.
 - Computed in `search_impl` (the single routine all search paths flow through) and stored in `Editor::search_match_count`; the position math lives in the pure, unit-tested `search_match_position` helper
 - Add it to any statusline section, e.g. `[editor.statusline] center = ["search-count"]`
 - Known limitation: the count refreshes on search navigation, not on plain cursor moves or edits, so it can read stale until the next `n`/`N` or search
+
+### Multi-row statusline
+- The statusline can now spread across two rows so long elements (e.g. `version-control` and `file-name`) no longer crowd each other or push out other elements
+- `[editor.statusline.second-row]` adds a per-view row directly above the main statusline row; costs one row of document height
+- Takes the same `left`/`center`/`right` sub-keys as the main row; an omitted/unset row is not rendered (no leftover gap), so single-row setups are unchanged
+- Implemented by reserving the row in `render_view` and tracking the reservation via a new `View::statusline_height` (kept in sync in `Editor::resize`) so `inner_area`/`inner_height` shrink the document accordingly; `statusline::render` was refactored into a per-row `render_row` helper
+- The `version-control` element can be styled independently via the new `ui.statusline.version-control` theme key (falls back to `ui.statusline` when unset)
+- Config:
+  ```toml
+  [editor.statusline]
+  left = ["mode", "spinner", "diagnostics"]
+  center = ["search-count"]
+  right = ["position-percentage"]
+
+  [editor.statusline.second-row]
+  left = ["version-control"]  # branch name
+  right = ["file-name"]       # file path gets the rest of the row
+  ```
+
+### Adaptive file path shortening
+- The `file-name` statusline element now shows the full relative path while it fits, and only when the row runs out of room does it abbreviate leading directories fish-style — topmost component first (`helix-term` → `h`), one at a time, until the path fits (e.g. `h/s/ui/editor.rs`)
+- The file name itself is never abbreviated; hidden directories keep their leading dot (`.config` → `.c`)
+- Width budget is computed from the full view width minus what the other elements on the row already consume (so on the second row it shrinks to avoid colliding with `version-control`); for the fit to be exact, place `file-name` in the row's `right` zone (center elements are laid out after it)
+- Pure logic lives in `fit_path`/`abbreviate_segment` in `helix-term/src/ui/statusline.rs`, covered by unit tests
