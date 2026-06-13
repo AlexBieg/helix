@@ -454,13 +454,13 @@ pub struct Config {
 #[serde(rename_all = "kebab-case")]
 pub enum PickerAnimation {
     /// No animation.
+    #[default]
     None,
     /// Grow from one row down to full height.
     Unfold,
     /// Grow from the center out to full width.
     UnfoldHorizontal,
     /// Grow from the center out in both dimensions (zoom/iris).
-    #[default]
     UnfoldBoth,
     /// Reveal result rows top-to-bottom.
     Cascade,
