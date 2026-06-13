@@ -144,6 +144,22 @@ Custom features added on top of upstream Helix.
   right = ["file-name"]       # file path gets the rest of the row
   ```
 
+### Session persistence
+- Automatically saves and restores open files, split layout, cursor positions, selections, and scroll state per workspace
+- Session data is stored as TOML at `<workspace_root>/.helix/session.toml` (one session per project/workspace)
+- Auto-saves on editor exit (`:q`, `:qa`) and restores on startup when launching with no arguments
+- Includes the recent files MRU list so the recent file picker survives restarts
+- Manual save via `:save-session`
+- Gracefully skips files that no longer exist on disk during restore (no error, just moves on)
+- Backward-compatible: missing fields in old session files get sensible defaults
+- Config:
+  ```toml
+  [editor.session]
+  persistence = true          # master switch
+  save-on-exit = true         # auto-save on quit
+  restore-on-startup = true   # auto-restore on launch with no args
+  ```
+
 ### Adaptive file path shortening
 - The `file-name` statusline element now shows the full relative path while it fits, and only when the row runs out of room does it abbreviate leading directories fish-style — topmost component first (`helix-term` → `h`), one at a time, until the path fits (e.g. `h/s/ui/editor.rs`)
 - The file name itself is never abbreviated; hidden directories keep their leading dot (`.config` → `.c`)

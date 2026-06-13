@@ -3105,6 +3105,16 @@ impl Editor {
                         old_to_new.insert(old_idx, new_idx);
                         let doc_id = self.new_document(doc);
                         self.track_recent_file(path);
+
+                        let doc_mut = doc_mut!(self, &doc_id);
+                        if let Some(diff_base) = self.diff_providers.get_diff_base(path) {
+                            doc_mut.set_diff_base(diff_base);
+                        }
+                        doc_mut.set_version_control_head(
+                            self.diff_providers.get_current_head_name(path),
+                        );
+                        doc_mut.set_blame(self.diff_providers.get_blame(path));
+
                         doc_ids.push(doc_id);
                     }
                     Err(_) => continue,

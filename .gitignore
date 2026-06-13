@@ -3,4 +3,5 @@ target
 helix-term/rustfmt.toml
 result
 runtime/grammars
+.helix
 .DS_Store
