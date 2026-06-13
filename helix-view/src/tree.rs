@@ -669,6 +669,34 @@ impl Tree {
     pub fn area(&self) -> Rect {
         self.area
     }
+
+    pub fn root(&self) -> ViewId {
+        self.root
+    }
+
+    pub fn is_container(&self, id: ViewId) -> bool {
+        matches!(self.nodes.get(id), Some(Node { content: Content::Container(..), .. }))
+    }
+
+    pub fn container_layout(&self, id: ViewId) -> Option<Layout> {
+        match self.nodes.get(id) {
+            Some(Node {
+                content: Content::Container(container),
+                ..
+            }) => Some(container.layout),
+            _ => None,
+        }
+    }
+
+    pub fn container_children(&self, id: ViewId) -> Option<&[ViewId]> {
+        match self.nodes.get(id) {
+            Some(Node {
+                content: Content::Container(container),
+                ..
+            }) => Some(&container.children),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]

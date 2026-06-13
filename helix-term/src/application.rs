@@ -101,6 +101,10 @@ impl Application {
         setup_integration_logging();
 
         use helix_view::editor::Action;
+        let session_restore = config.editor.session.persistence
+            && config.editor.session.restore_on_startup
+            && !args.load_tutor
+            && args.files.is_empty();
 
         let mut theme_parent_dirs = vec![helix_loader::config_dir()];
         theme_parent_dirs.extend(helix_loader::runtime_dirs().iter().cloned());
@@ -140,95 +144,94 @@ impl Application {
 
         let jobs = Jobs::new();
 
-        if args.load_tutor {
-            let path = helix_loader::runtime_file(Path::new("tutor"));
-            editor.open(&path, Action::VerticalSplit)?;
-            // Unset path to prevent accidentally saving to the original tutor file.
-            doc_mut!(editor).set_path(None);
-        } else if !args.files.is_empty() {
-            let mut files_it = args.files.into_iter().peekable();
-
-            // If the first file is a directory, skip it and open a picker
-            if let Some((first, _)) = files_it.next_if(|(p, _)| p.is_dir()) {
-                let picker = ui::file_picker(&editor, first);
-                compositor.push(Box::new(overlaid(picker)));
+        let mut loaded_session = false;
+        if session_restore {
+            match editor.load_session() {
+                Ok(n) if n > 0 => {
+                    loaded_session = true;
+                    editor.set_status(format!("Restored {n} file{} from session.", if n == 1 { "" } else { "s" }));
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    log::warn!("Failed to load session: {err}");
+                }
             }
+        }
 
-            // If there are any more files specified, open them
-            if files_it.peek().is_some() {
-                let mut nr_of_files = 0;
-                for (file, pos) in files_it {
-                    nr_of_files += 1;
-                    if file.is_dir() {
-                        return Err(anyhow::anyhow!(
-                            "expected a path to file, but found a directory: {file:?}. (to open a directory pass it as first argument)"
-                        ));
-                    } else {
-                        // If the user passes in either `--vsplit` or
-                        // `--hsplit` as a command line argument, all the given
-                        // files will be opened according to the selected
-                        // option. If neither of those two arguments are passed
-                        // in, just load the files normally.
-                        let action = match args.split {
-                            _ if nr_of_files == 1 => Action::VerticalSplit,
-                            Some(Layout::Vertical) => Action::VerticalSplit,
-                            Some(Layout::Horizontal) => Action::HorizontalSplit,
-                            None => Action::Load,
-                        };
-                        let old_id = editor.document_id_by_path(&file);
-                        let doc_id = match editor.open(&file, action) {
-                            // Ignore irregular files during application init.
-                            Err(DocumentOpenError::IrregularFile) => {
-                                nr_of_files -= 1;
-                                continue;
-                            }
-                            Err(err) => return Err(anyhow::anyhow!(err)),
-                            // We can't open more than 1 buffer for 1 file, in this case we already have opened this file previously
-                            Ok(doc_id) if old_id == Some(doc_id) => {
-                                nr_of_files -= 1;
-                                doc_id
-                            }
-                            Ok(doc_id) => doc_id,
-                        };
-                        // with Action::Load all documents have the same view
-                        // NOTE: this isn't necessarily true anymore. If
-                        // `--vsplit` or `--hsplit` are used, the file which is
-                        // opened last is focused on.
-                        let view_id = editor.tree.focus;
-                        let doc = doc_mut!(editor, &doc_id);
-                        let selection = pos
-                            .into_iter()
-                            .map(|coords| {
-                                Range::point(pos_at_coords(doc.text().slice(..), coords, true))
-                            })
-                            .collect();
-                        doc.set_selection(view_id, selection);
+        if !loaded_session {
+            if args.load_tutor {
+                let path = helix_loader::runtime_file(Path::new("tutor"));
+                editor.open(&path, Action::VerticalSplit)?;
+                doc_mut!(editor).set_path(None);
+            } else if !args.files.is_empty() {
+                let mut files_it = args.files.into_iter().peekable();
+
+                if let Some((first, _)) = files_it.next_if(|(p, _)| p.is_dir()) {
+                    let picker = ui::file_picker(&editor, first);
+                    compositor.push(Box::new(overlaid(picker)));
+                }
+
+                if files_it.peek().is_some() {
+                    let mut nr_of_files = 0;
+                    for (file, pos) in files_it {
+                        nr_of_files += 1;
+                        if file.is_dir() {
+                            return Err(anyhow::anyhow!(
+                                "expected a path to file, but found a directory: {file:?}. (to open a directory pass it as first argument)"
+                            ));
+                        } else {
+                            let action = match args.split {
+                                _ if nr_of_files == 1 => Action::VerticalSplit,
+                                Some(Layout::Vertical) => Action::VerticalSplit,
+                                Some(Layout::Horizontal) => Action::HorizontalSplit,
+                                None => Action::Load,
+                            };
+                            let old_id = editor.document_id_by_path(&file);
+                            let doc_id = match editor.open(&file, action) {
+                                Err(DocumentOpenError::IrregularFile) => {
+                                    nr_of_files -= 1;
+                                    continue;
+                                }
+                                Err(err) => return Err(anyhow::anyhow!(err)),
+                                Ok(doc_id) if old_id == Some(doc_id) => {
+                                    nr_of_files -= 1;
+                                    doc_id
+                                }
+                                Ok(doc_id) => doc_id,
+                            };
+                            let view_id = editor.tree.focus;
+                            let doc = doc_mut!(editor, &doc_id);
+                            let selection = pos
+                                .into_iter()
+                                .map(|coords| {
+                                    Range::point(pos_at_coords(doc.text().slice(..), coords, true))
+                                })
+                                .collect();
+                            doc.set_selection(view_id, selection);
+                        }
                     }
-                }
 
-                // if all files were invalid, replace with empty buffer
-                if nr_of_files == 0 {
-                    editor.new_file(Action::VerticalSplit);
+                    if nr_of_files == 0 {
+                        editor.new_file(Action::VerticalSplit);
+                    } else {
+                        editor.set_status(format!(
+                            "Loaded {} file{}.",
+                            nr_of_files,
+                            if nr_of_files == 1 { "" } else { "s" }
+                        ));
+                        let (view, doc) = current!(editor);
+                        align_view(doc, view, Align::Center);
+                    }
                 } else {
-                    editor.set_status(format!(
-                        "Loaded {} file{}.",
-                        nr_of_files,
-                        if nr_of_files == 1 { "" } else { "s" } // avoid "Loaded 1 files." grammo
-                    ));
-                    // align the view to center after all files are loaded,
-                    // does not affect views without pos since it is at the top
-                    let (view, doc) = current!(editor);
-                    align_view(doc, view, Align::Center);
+                    editor.new_file(Action::VerticalSplit);
                 }
-            } else {
+            } else if stdin().is_terminal() || cfg!(feature = "integration") {
                 editor.new_file(Action::VerticalSplit);
+            } else {
+                editor
+                    .new_file_from_stdin(Action::VerticalSplit)
+                    .unwrap_or_else(|_| editor.new_file(Action::VerticalSplit));
             }
-        } else if stdin().is_terminal() || cfg!(feature = "integration") {
-            editor.new_file(Action::VerticalSplit);
-        } else {
-            editor
-                .new_file_from_stdin(Action::VerticalSplit)
-                .unwrap_or_else(|_| editor.new_file(Action::VerticalSplit));
         }
 
         #[cfg(windows)]
@@ -1464,6 +1467,12 @@ impl Application {
         //        want to try to run as much cleanup as we can, regardless of
         //        errors along the way
         let mut errs = Vec::new();
+
+        if self.editor.config().session.persistence && self.editor.config().session.save_on_exit {
+            if let Err(err) = self.editor.save_session() {
+                log::error!("Failed to save session: {err}");
+            }
+        }
 
         if let Err(err) = self
             .jobs

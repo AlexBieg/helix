@@ -436,6 +436,9 @@ pub struct Config {
     pub buffer_picker: BufferPickerConfig,
     /// Whether to implicitly trust every workspace or not
     pub insecure: bool,
+    /// Session persistence configuration.
+    #[serde(default)]
+    pub session: SessionConfig,
     /// Configuration for automatic file reloading on external changes.
     #[serde(default)]
     pub file_watcher: FileWatcherConfig,
@@ -504,6 +507,27 @@ impl NotificationConfig {
             Severity::Error => self.timeout.error,
         };
         (millis != 0).then(|| Duration::from_millis(millis))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SessionConfig {
+    /// Whether to persist and restore open files and editor state on exit/startup.
+    pub persistence: bool,
+    /// Whether to save the session on editor exit.
+    pub save_on_exit: bool,
+    /// Whether to restore the session on editor startup when no files are specified.
+    pub restore_on_startup: bool,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            persistence: true,
+            save_on_exit: true,
+            restore_on_startup: true,
+        }
     }
 }
 
@@ -1303,6 +1327,7 @@ impl Default for Config {
             kitty_keyboard_protocol: Default::default(),
             buffer_picker: BufferPickerConfig::default(),
             insecure: false,
+            session: SessionConfig::default(),
             file_watcher: FileWatcherConfig::default(),
             blame: false,
             notifications: NotificationConfig::default(),
@@ -2903,6 +2928,319 @@ impl CursorCache {
     }
 }
 
+impl Editor {
+    pub fn save_session(&self) -> anyhow::Result<()> {
+        let config = self.config();
+        if !config.session.persistence {
+            return Ok(());
+        }
+
+        let session_path = helix_loader::workspace_session_file();
+
+        let mut doc_order: Vec<DocumentId> = Vec::new();
+        let mut seen = HashSet::new();
+
+        for (view, _) in self.tree.views() {
+            if seen.insert(view.doc) {
+                if let Some(doc) = self.documents.get(&view.doc) {
+                    if doc.path().is_some() {
+                        doc_order.push(view.doc);
+                    }
+                }
+            }
+        }
+
+        for (&doc_id, doc) in &self.documents {
+            if doc.path().is_some() && seen.insert(doc_id) {
+                doc_order.push(doc_id);
+            }
+        }
+
+        if doc_order.is_empty() {
+            return Ok(());
+        }
+
+        let mut doc_info: Vec<(DocumentId, Option<PathBuf>)> = Vec::new();
+        for &doc_id in &doc_order {
+            if let Some(doc) = self.documents.get(&doc_id) {
+                doc_info.push((doc_id, doc.path().map(|p| p.to_path_buf())));
+            }
+        }
+
+        let focus_doc = self.tree.try_get(self.tree.focus).map(|v| v.doc);
+        let active_document_index = focus_doc
+            .and_then(|fd| doc_order.iter().position(|&d| d == fd))
+            .unwrap_or(0);
+
+        let session_docs: Vec<crate::session::SessionDocument> = doc_info
+            .iter()
+            .map(|(doc_id, path)| {
+                let doc = &self.documents[doc_id];
+                let text = doc.text().slice(..);
+                let line_count = text.len_lines();
+
+                let view = self
+                    .tree
+                    .views()
+                    .find(|(v, _)| v.doc == *doc_id)
+                    .map(|(v, _)| (v.id, doc.selection(v.id), doc.view_offset(v.id)));
+
+                let (cursor_line, cursor_col, selections, scroll_line, scroll_col, vertical_offset) =
+                    if let Some((_view_id, selection, view_offset)) = view {
+                        let primary = selection.primary();
+                        let cursor_pos = helix_core::coords_at_pos(text, primary.cursor(text));
+
+                        let sels: Vec<crate::session::SessionSelection> = selection
+                            .ranges()
+                            .iter()
+                            .map(|range| {
+                                let anchor_pos = helix_core::coords_at_pos(text, range.anchor);
+                                let head_pos = helix_core::coords_at_pos(text, range.head);
+                                crate::session::SessionSelection {
+                                    anchor_line: anchor_pos.row.saturating_add(1),
+                                    anchor_col: anchor_pos.col.saturating_add(1),
+                                    head_line: head_pos.row.saturating_add(1),
+                                    head_col: head_pos.col.saturating_add(1),
+                                }
+                            })
+                            .collect();
+
+                        (
+                            cursor_pos.row.saturating_add(1),
+                            cursor_pos.col.saturating_add(1),
+                            sels,
+                            view_offset
+                                .anchor
+                                .min(line_count.saturating_sub(1))
+                                .saturating_add(1),
+                            view_offset.horizontal_offset.saturating_add(1),
+                            view_offset.vertical_offset,
+                        )
+                    } else {
+                        (1, 1, Vec::new(), 1, 1, 0)
+                    };
+
+                crate::session::SessionDocument {
+                    path: path.clone(),
+                    cursor_line,
+                    cursor_col,
+                    selections,
+                    scroll_line,
+                    scroll_col,
+                    vertical_offset,
+                }
+            })
+            .collect();
+
+        let splits = self.build_session_tree(self.tree.root(), &doc_order);
+
+        let session = crate::session::Session {
+            active_document_index,
+            documents: session_docs,
+            splits,
+            recent_files: self.recent_files.clone(),
+        };
+
+        if let Some(parent) = session_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        session.save_to_file(&session_path)?;
+        Ok(())
+    }
+
+    fn build_session_tree(
+        &self,
+        node_id: crate::ViewId,
+        doc_order: &[DocumentId],
+    ) -> crate::session::SessionTree {
+        if self.tree.is_container(node_id) {
+            let children = self.tree.container_children(node_id).unwrap_or(&[]);
+            let layout = match self.tree.container_layout(node_id) {
+                Some(crate::tree::Layout::Horizontal) => crate::session::SessionLayout::Horizontal,
+                Some(crate::tree::Layout::Vertical) => crate::session::SessionLayout::Vertical,
+                _ => crate::session::SessionLayout::Vertical,
+            };
+            crate::session::SessionTree::Split {
+                layout,
+                children: children
+                    .iter()
+                    .map(|&child_id| self.build_session_tree(child_id, doc_order))
+                    .collect(),
+            }
+        } else {
+            let view = self.tree.get(node_id);
+            let doc_index = doc_order.iter().position(|&d| d == view.doc).unwrap_or(0);
+            crate::session::SessionTree::View {
+                document_index: doc_index,
+            }
+        }
+    }
+
+    pub fn load_session(&mut self) -> anyhow::Result<usize> {
+        let session_path = helix_loader::workspace_session_file();
+        if !session_path.exists() {
+            return Ok(0);
+        }
+
+        let session = match crate::session::Session::load_from_file(&session_path) {
+            Ok(s) => s,
+            Err(_) => return Ok(0),
+        };
+
+        if session.documents.is_empty() {
+            return Ok(0);
+        }
+
+        let mut doc_ids: Vec<DocumentId> = Vec::new();
+        let mut old_to_new: HashMap<usize, usize> = HashMap::new();
+        for (old_idx, doc_data) in session.documents.iter().enumerate() {
+            if let Some(ref path) = doc_data.path {
+                if !path.exists() {
+                    continue;
+                }
+                match Document::open(path, None, true, self.config.clone(), self.syn_loader.clone())
+                {
+                    Ok(doc) => {
+                        let new_idx = doc_ids.len();
+                        old_to_new.insert(old_idx, new_idx);
+                        let doc_id = self.new_document(doc);
+                        self.track_recent_file(path);
+                        doc_ids.push(doc_id);
+                    }
+                    Err(_) => continue,
+                }
+            }
+        }
+
+        if doc_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let layouts = collect_tree_layouts(&session.splits);
+        let valid_layouts: Vec<(usize, crate::tree::Layout)> = layouts
+            .iter()
+            .filter_map(|(doc_idx, layout)| old_to_new.get(doc_idx).map(|&new_idx| (new_idx, *layout)))
+            .collect();
+
+        let mut combined: Vec<(usize, crate::tree::Layout)> = Vec::new();
+
+        if valid_layouts.is_empty() {
+            let active_idx = old_to_new
+                .get(&session.active_document_index)
+                .copied()
+                .unwrap_or(0);
+            combined.push((active_idx, crate::tree::Layout::Vertical));
+        } else {
+            combined.extend(valid_layouts);
+        }
+
+        for (i, (doc_idx, layout)) in combined.iter().enumerate() {
+            let doc_id = doc_ids[*doc_idx];
+
+            if i == 0 {
+                if self.tree.try_get(self.tree.focus).is_some() {
+                    self.switch(doc_id, Action::Replace);
+                } else {
+                    self.switch(doc_id, Action::VerticalSplit);
+                }
+            } else {
+                let action = match layout {
+                    crate::tree::Layout::Horizontal => Action::HorizontalSplit,
+                    crate::tree::Layout::Vertical => Action::VerticalSplit,
+                };
+                self.switch(doc_id, action);
+            }
+        }
+
+        for (old_idx, doc_data) in session.documents.iter().enumerate() {
+            let Some(&new_idx) = old_to_new.get(&old_idx) else {
+                continue;
+            };
+            let doc_id = doc_ids[new_idx];
+            let doc = doc_mut!(self, &doc_id);
+            let text = doc.text().slice(..);
+
+            let view_id = self
+                .tree
+                .views()
+                .find(|(v, _)| v.doc == doc_id)
+                .map(|(v, _)| v.id);
+
+            if let Some(view_id) = view_id {
+                if doc_data.selections.is_empty() {
+                    let primary_pos = Position::new(
+                        doc_data.cursor_line.saturating_sub(1),
+                        doc_data.cursor_col.saturating_sub(1),
+                    );
+                    let primary_offset = helix_core::pos_at_coords(text, primary_pos, true);
+                    doc.set_selection(view_id, Selection::point(primary_offset));
+                } else {
+                    let mut ranges = helix_core::SmallVec::new();
+                    for sel in &doc_data.selections {
+                        let anchor_pos = Position::new(
+                            sel.anchor_line.saturating_sub(1),
+                            sel.anchor_col.saturating_sub(1),
+                        );
+                        let head_pos = Position::new(
+                            sel.head_line.saturating_sub(1),
+                            sel.head_col.saturating_sub(1),
+                        );
+                        let anchor = helix_core::pos_at_coords(text, anchor_pos, true);
+                        let head = helix_core::pos_at_coords(text, head_pos, true);
+                        ranges.push(Range::new(anchor, head));
+                    }
+                    if !ranges.is_empty() {
+                        let selection = Selection::new(ranges, 0);
+                        doc.set_selection(view_id, selection);
+                    }
+                }
+
+                let line_count = doc.text().slice(..).len_lines();
+                let scroll_anchor = doc_data
+                    .scroll_line
+                    .saturating_sub(1)
+                    .min(line_count.saturating_sub(1));
+                let view_offset = crate::view::ViewPosition {
+                    anchor: scroll_anchor,
+                    horizontal_offset: doc_data.scroll_col.saturating_sub(1),
+                    vertical_offset: doc_data.vertical_offset,
+                };
+                doc.set_view_offset(view_id, view_offset);
+            }
+        }
+
+        self.recent_files = session.recent_files.clone();
+
+        Ok(doc_ids.len())
+    }
+}
+
+fn collect_tree_layouts(tree: &crate::session::SessionTree) -> Vec<(usize, crate::tree::Layout)> {
+    flatten_tree(tree, crate::tree::Layout::Vertical)
+}
+
+fn flatten_tree(
+    tree: &crate::session::SessionTree,
+    inherited_layout: crate::tree::Layout,
+) -> Vec<(usize, crate::tree::Layout)> {
+    match tree {
+        crate::session::SessionTree::View { document_index } => {
+            vec![(*document_index, inherited_layout)]
+        }
+        crate::session::SessionTree::Split { layout, children } => {
+            let tree_layout = match layout {
+                crate::session::SessionLayout::Horizontal => crate::tree::Layout::Horizontal,
+                crate::session::SessionLayout::Vertical => crate::tree::Layout::Vertical,
+            };
+            let mut result = Vec::new();
+            for child in children {
+                result.extend(flatten_tree(child, tree_layout));
+            }
+            result
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2943,5 +3281,121 @@ auto-reload = false
         let config: Config = toml::from_str(toml).unwrap();
         assert!(config.file_watcher.auto_reload);
         assert_eq!(config.file_watcher.debounce_ms, 100);
+    }
+
+    #[test]
+    fn test_session_config_default() {
+        let config = SessionConfig::default();
+        assert!(config.persistence);
+        assert!(config.save_on_exit);
+        assert!(config.restore_on_startup);
+    }
+
+    #[test]
+    fn test_session_config_deserialize_full() {
+        let toml = r#"
+[session]
+persistence = false
+save-on-exit = false
+restore-on-startup = false
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(!config.session.persistence);
+        assert!(!config.session.save_on_exit);
+        assert!(!config.session.restore_on_startup);
+    }
+
+    #[test]
+    fn test_session_config_deserialize_partial() {
+        let toml = r#"
+[session]
+persistence = false
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(!config.session.persistence);
+        assert!(config.session.save_on_exit); // default
+        assert!(config.session.restore_on_startup); // default
+    }
+
+    #[test]
+    fn test_session_config_missing() {
+        let toml = "";
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(config.session.persistence);
+        assert!(config.session.save_on_exit);
+        assert!(config.session.restore_on_startup);
+    }
+
+    #[test]
+    fn test_flatten_tree_single_view() {
+        use crate::session::SessionTree;
+
+        let tree = SessionTree::View { document_index: 5 };
+        let result = flatten_tree(&tree, crate::tree::Layout::Vertical);
+        assert_eq!(result, vec![(5, crate::tree::Layout::Vertical)]);
+    }
+
+    #[test]
+    fn test_flatten_tree_nested_splits() {
+        use crate::session::{SessionLayout, SessionTree};
+
+        let tree = SessionTree::Split {
+            layout: SessionLayout::Vertical,
+            children: vec![
+                SessionTree::View { document_index: 0 },
+                SessionTree::Split {
+                    layout: SessionLayout::Horizontal,
+                    children: vec![
+                        SessionTree::View { document_index: 1 },
+                        SessionTree::View { document_index: 2 },
+                    ],
+                },
+            ],
+        };
+
+        let result = flatten_tree(&tree, crate::tree::Layout::Vertical);
+        assert_eq!(
+            result,
+            vec![
+                (0, crate::tree::Layout::Vertical),
+                (1, crate::tree::Layout::Horizontal),
+                (2, crate::tree::Layout::Horizontal),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_flatten_tree_empty_split() {
+        use crate::session::{SessionLayout, SessionTree};
+
+        let tree = SessionTree::Split {
+            layout: SessionLayout::Vertical,
+            children: vec![],
+        };
+
+        let result = flatten_tree(&tree, crate::tree::Layout::Vertical);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_collect_tree_layouts() {
+        use crate::session::{SessionLayout, SessionTree};
+
+        let tree = SessionTree::Split {
+            layout: SessionLayout::Horizontal,
+            children: vec![
+                SessionTree::View { document_index: 3 },
+                SessionTree::View { document_index: 7 },
+            ],
+        };
+
+        let result = collect_tree_layouts(&tree);
+        assert_eq!(
+            result,
+            vec![
+                (3, crate::tree::Layout::Horizontal),
+                (7, crate::tree::Layout::Horizontal),
+            ]
+        );
     }
 }

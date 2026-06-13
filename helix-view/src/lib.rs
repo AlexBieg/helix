@@ -16,14 +16,18 @@ pub mod input;
 pub mod keyboard;
 pub mod notification;
 pub mod register;
+pub mod session;
 pub mod theme;
 pub mod tree;
 pub mod view;
 
 use std::num::NonZeroUsize;
 
+use serde::{Deserialize, Serialize};
+
 // uses NonZeroUsize so Option<DocumentId> use a byte rather than two
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct DocumentId(NonZeroUsize);
 
 impl Default for DocumentId {
@@ -49,6 +53,19 @@ impl std::fmt::Display for DocumentId {
 
 slotmap::new_key_type! {
     pub struct ViewId;
+}
+
+impl Serialize for ViewId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u64(self.0.as_ffi())
+    }
+}
+
+impl<'de> Deserialize<'de> for ViewId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let val = u64::deserialize(deserializer)?;
+        Ok(ViewId(slotmap::KeyData::from_ffi(val)))
+    }
 }
 
 pub enum Align {

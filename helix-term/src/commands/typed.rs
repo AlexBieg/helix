@@ -115,7 +115,8 @@ fn quit(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow
 
     // last view and we have unsaved changes
     if cx.editor.tree.views().count() == 1 {
-        buffers_remaining_impl(cx.editor)?
+        buffers_remaining_impl(cx.editor)?;
+        let _ = cx.editor.save_session();
     }
 
     cx.block_try_flush_writes()?;
@@ -127,6 +128,10 @@ fn quit(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow
 fn force_quit(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
     if event != PromptEvent::Validate {
         return Ok(());
+    }
+
+    if cx.editor.tree.views().count() == 1 {
+        let _ = cx.editor.save_session();
     }
 
     cx.block_try_flush_writes()?;
@@ -963,6 +968,9 @@ fn quit_all_impl(cx: &mut compositor::Context, force: bool) -> anyhow::Result<()
     if !force {
         buffers_remaining_impl(cx.editor)?;
     }
+
+    // Save session before closing any views to capture the full layout.
+    let _ = cx.editor.save_session();
 
     // close all views
     let views: Vec<_> = cx.editor.tree.views().map(|(view, _)| view.id).collect();
@@ -4144,6 +4152,22 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         completer: CommandCompleter::none(),
         signature: Signature::DEFAULT,
     },
+    TypableCommand {
+        name: "save-session",
+        aliases: &[],
+        doc: "Save the current session (open files, cursor positions, layout).",
+        fun: save_session,
+        completer: CommandCompleter::none(),
+        signature: Signature::DEFAULT,
+    },
+    TypableCommand {
+        name: "load-session",
+        aliases: &[],
+        doc: "Restore a previously saved session.",
+        fun: load_session,
+        completer: CommandCompleter::none(),
+        signature: Signature::DEFAULT,
+    },
 ];
 
 pub static TYPABLE_COMMAND_MAP: Lazy<HashMap<&'static str, &'static TypableCommand>> =
@@ -4600,5 +4624,39 @@ fn untrust_workspace(
     }
 
     helix_loader::workspace_trust::WorkspaceTrust::load(false).untrust_workspace();
+    Ok(())
+}
+
+fn save_session(
+    cx: &mut compositor::Context,
+    _args: Args<'_>,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    cx.editor.save_session()
+}
+
+fn load_session(
+    cx: &mut compositor::Context,
+    _args: Args<'_>,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    let loaded = cx.editor.load_session()?;
+    if loaded > 0 {
+        cx.editor.set_status(format!(
+            "Loaded {} file{} from session.",
+            loaded,
+            if loaded == 1 { "" } else { "s" }
+        ));
+    } else {
+        cx.editor.set_error("No session to load");
+    }
     Ok(())
 }
