@@ -1,8 +1,4 @@
-use helix_core::{
-    doc_formatter::FormattedGrapheme,
-    text_annotations::LineAnnotation,
-    Position,
-};
+use helix_core::{doc_formatter::FormattedGrapheme, text_annotations::LineAnnotation, Position};
 
 use crate::Document;
 
@@ -14,10 +10,7 @@ pub(crate) struct BlameLineAnnotation<'a> {
 
 impl<'a> BlameLineAnnotation<'a> {
     #[allow(clippy::new_ret_no_self)]
-    pub(crate) fn new(
-        doc: &'a Document,
-        cursor: usize,
-    ) -> Box<dyn LineAnnotation + 'a> {
+    pub(crate) fn new(doc: &'a Document, cursor: usize) -> Box<dyn LineAnnotation + 'a> {
         let cursor_line = doc.text().slice(..).char_to_line(cursor);
         Box::new(BlameLineAnnotation {
             _doc: doc,

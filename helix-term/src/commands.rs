@@ -2656,13 +2656,23 @@ fn global_search(cx: &mut Context) {
                      editor: &mut Editor,
                      config: std::sync::Arc<GlobalSearchConfig>,
                      injector: &ui::picker::Injector<_, _>| {
-        let glob_raw = columns.get("glob").map(|s| s.trim()).filter(|s| !s.is_empty());
+        let glob_raw = columns
+            .get("glob")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty());
         let (glob_pattern, fallback_query) = match glob_raw {
             Some(raw) => {
                 let mut parts = raw.split_whitespace();
                 let glob = parts.next().unwrap_or("");
                 let rest: Vec<&str> = parts.collect();
-                (Some(glob.to_string()), if rest.is_empty() { None } else { Some(rest.join(" ")) })
+                (
+                    Some(glob.to_string()),
+                    if rest.is_empty() {
+                        None
+                    } else {
+                        Some(rest.join(" "))
+                    },
+                )
             }
             None => (None, None),
         };
@@ -2709,25 +2719,23 @@ fn global_search(cx: &mut Context) {
             .canonicalize()
             .unwrap_or_else(|_| search_root.clone());
 
-        let glob_set = glob_pattern
-            .as_deref()
-            .and_then(|pattern| {
-                let mut builder = globset::GlobSetBuilder::new();
-                for pat in pattern.split_whitespace() {
-                    match globset::Glob::new(pat) {
-                        Ok(glob) => {
-                            builder.add(glob);
-                        }
-                        Err(err) => {
-                            log::info!("Invalid glob pattern '{}': {}", pat, err);
-                        }
+        let glob_set = glob_pattern.as_deref().and_then(|pattern| {
+            let mut builder = globset::GlobSetBuilder::new();
+            for pat in pattern.split_whitespace() {
+                match globset::Glob::new(pat) {
+                    Ok(glob) => {
+                        builder.add(glob);
+                    }
+                    Err(err) => {
+                        log::info!("Invalid glob pattern '{}': {}", pat, err);
                     }
                 }
-                match builder.build() {
-                    Ok(set) if !set.is_empty() => Some(set),
-                    _ => None,
-                }
-            });
+            }
+            match builder.build() {
+                Ok(set) if !set.is_empty() => Some(set),
+                _ => None,
+            }
+        });
 
         let injector = injector.clone();
         let search_root_for_glob = search_root.clone();
@@ -2750,21 +2758,15 @@ fn global_search(cx: &mut Context) {
                         return false;
                     }
                     if let Some(ref glob_set) = glob_set {
-                        let is_dir = entry
-                            .file_type()
-                            .map(|ft| ft.is_dir())
-                            .unwrap_or(false);
+                        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
                         if !is_dir {
                             let path = entry.path();
-                            let is_match = glob_set
-                                .is_match(path)
+                            let is_match = glob_set.is_match(path)
                                 || path
                                     .strip_prefix(&search_root_for_glob)
                                     .map(|rel| glob_set.is_match(rel))
                                     .unwrap_or(false)
-                                || path
-                                    .file_name()
-                                    .is_some_and(|name| glob_set.is_match(name));
+                                || path.file_name().is_some_and(|name| glob_set.is_match(name));
                             if !is_match {
                                 return false;
                             }
@@ -3669,27 +3671,25 @@ fn changed_file_picker(cx: &mut Context) {
         },
     )
     .with_preview(|_editor, meta| Some((meta.path().into(), None)))
-        .with_content_preview(move |editor, change: &FileChange| match change {
-            FileChange::Modified { path }
-            | FileChange::Conflict { path } => {
-                let diff_base = editor.diff_providers.get_diff_base(path)?;
-                let current = std::fs::read(path).ok()?;
-                let old = Rope::from(String::from_utf8_lossy(&diff_base).as_ref());
-                let new = Rope::from(String::from_utf8_lossy(&current).as_ref());
-                let diff_text = helix_core::diff::unified_diff(&old, &new, path);
-                if diff_text.is_empty() {
-                    None
-                } else {
-                    Some(Rope::from(diff_text.as_str()))
-                }
+    .with_content_preview(move |editor, change: &FileChange| match change {
+        FileChange::Modified { path } | FileChange::Conflict { path } => {
+            let diff_base = editor.diff_providers.get_diff_base(path)?;
+            let current = std::fs::read(path).ok()?;
+            let old = Rope::from(String::from_utf8_lossy(&diff_base).as_ref());
+            let new = Rope::from(String::from_utf8_lossy(&current).as_ref());
+            let diff_text = helix_core::diff::unified_diff(&old, &new, path);
+            if diff_text.is_empty() {
+                None
+            } else {
+                Some(Rope::from(diff_text.as_str()))
             }
-            FileChange::Untracked { path }
-            | FileChange::Renamed { to_path: path, .. } => {
-                let content = std::fs::read(path).ok()?;
-                Some(Rope::from(String::from_utf8_lossy(&content).as_ref()))
-            }
-            FileChange::Deleted { .. } => None,
-        });
+        }
+        FileChange::Untracked { path } | FileChange::Renamed { to_path: path, .. } => {
+            let content = std::fs::read(path).ok()?;
+            Some(Rope::from(String::from_utf8_lossy(&content).as_ref()))
+        }
+        FileChange::Deleted { .. } => None,
+    });
     let injector = picker.injector();
 
     cx.editor
@@ -3819,9 +3819,10 @@ fn recent_file_picker(cx: &mut Context) {
         return;
     }
 
-    let columns = [PickerColumn::new("path", |path: &PathBuf, config: &PathStyleConfig| {
-        config.stylize(Some(path.as_path()), None)
-    })];
+    let columns = [PickerColumn::new(
+        "path",
+        |path: &PathBuf, config: &PathStyleConfig| config.stylize(Some(path.as_path()), None),
+    )];
 
     let picker = Picker::new(
         columns,
@@ -4715,10 +4716,7 @@ pub fn resolve_conflict_at_cursor_editor(editor: &mut Editor, resolution: Confli
         ConflictResolution::Both => {
             let ours_end = region.base_divider_line.unwrap_or(region.divider_line);
             let ours: String = text
-                .slice(
-                    text.line_to_char(region.start_marker_line + 1)
-                        ..text.line_to_char(ours_end),
-                )
+                .slice(text.line_to_char(region.start_marker_line + 1)..text.line_to_char(ours_end))
                 .chunks()
                 .collect();
             let theirs: String = text
@@ -4823,12 +4821,12 @@ fn goto_conflict_impl(cx: &mut Context, direction: Direction) {
             let cursor_line = range.cursor_line(doc_text);
 
             let current_idx = match direction {
-                Direction::Forward => {
-                    regions.iter().position(|r| r.start_marker_line > cursor_line)
-                }
-                Direction::Backward => {
-                    regions.iter().rposition(|r| r.end_marker_line < cursor_line)
-                }
+                Direction::Forward => regions
+                    .iter()
+                    .position(|r| r.start_marker_line > cursor_line),
+                Direction::Backward => regions
+                    .iter()
+                    .rposition(|r| r.end_marker_line < cursor_line),
             };
 
             let target_idx = match (direction, current_idx) {
@@ -4843,11 +4841,7 @@ fn goto_conflict_impl(cx: &mut Context, direction: Direction) {
             let head = doc_text.line_to_char(region.end_marker_line + 1);
 
             if editor.mode == Mode::Select {
-                let head = if head < range.anchor {
-                    anchor
-                } else {
-                    head
-                };
+                let head = if head < range.anchor { anchor } else { head };
                 Range::new(range.anchor, head)
             } else {
                 Range::new(anchor, head).with_direction(direction)

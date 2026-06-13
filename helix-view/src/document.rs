@@ -2037,7 +2037,11 @@ impl Document {
                             }
                             hl += hunk.before.len() as isize - hunk.after.len() as isize;
                         }
-                        if hl < 0 { None } else { Some(hl as usize) }
+                        if hl < 0 {
+                            None
+                        } else {
+                            Some(hl as usize)
+                        }
                     };
                     mapped.push(head_line.and_then(|hl| entries.get(hl).cloned()));
                 }

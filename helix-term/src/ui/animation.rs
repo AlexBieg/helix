@@ -53,7 +53,10 @@ mod tests {
         assert_eq!(entrance_progress(None, now, ENTRANCE), 1.0);
         assert_eq!(entrance_progress(Some(now), now, ENTRANCE), 0.0);
         assert_eq!(entrance_progress(Some(now), now + ENTRANCE, ENTRANCE), 1.0);
-        assert_eq!(entrance_progress(Some(now), now + 10 * ENTRANCE, ENTRANCE), 1.0);
+        assert_eq!(
+            entrance_progress(Some(now), now + 10 * ENTRANCE, ENTRANCE),
+            1.0
+        );
     }
 
     #[test]
@@ -67,7 +70,10 @@ mod tests {
 
     #[test]
     fn blend_skips_non_rgb() {
-        assert_eq!(blend(Color::Red, Color::Rgb(1, 2, 3), 0.5), Color::Rgb(1, 2, 3));
+        assert_eq!(
+            blend(Color::Red, Color::Rgb(1, 2, 3), 0.5),
+            Color::Rgb(1, 2, 3)
+        );
         assert_eq!(blend(Color::Rgb(1, 2, 3), Color::Blue, 0.5), Color::Blue);
     }
 }

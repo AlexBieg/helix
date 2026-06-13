@@ -1475,7 +1475,10 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
         let area = inner.clip_left(1).with_height(1);
 
         if self.picker_normal {
-            (Some(Position::new(area.y as usize, area.x as usize)), CursorKind::Block)
+            (
+                Some(Position::new(area.y as usize, area.x as usize)),
+                CursorKind::Block,
+            )
         } else {
             self.prompt.cursor(area, editor)
         }
@@ -1585,25 +1588,25 @@ mod tests {
     }
 
     fn test_picker() -> Picker<String, ()> {
-        let columns = [Column::new(
-            "test",
-            |item: &String, _data: &()| item.clone().into(),
-        )];
+        let columns = [Column::new("test", |item: &String, _data: &()| {
+            item.clone().into()
+        })];
         Picker::new(columns, 0, [] as [String; 0], (), |_, _, _| {})
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn picker_normal_cursor_is_block() {
-        use std::sync::Arc;
-        use helix_view::editor::Config as EditorConfig;
-        use arc_swap::ArcSwap;
         use arc_swap::access::Map;
+        use arc_swap::ArcSwap;
+        use helix_view::editor::Config as EditorConfig;
+        use std::sync::Arc;
 
         let config = EditorConfig::default();
         let config_swapper = Arc::new(ArcSwap::from_pointee(config));
-        let config_access: Arc<dyn arc_swap::access::DynAccess<EditorConfig>> = Arc::new(
-            Map::new(Arc::clone(&config_swapper), |config: &EditorConfig| config),
-        );
+        let config_access: Arc<dyn arc_swap::access::DynAccess<EditorConfig>> = Arc::new(Map::new(
+            Arc::clone(&config_swapper),
+            |config: &EditorConfig| config,
+        ));
 
         let theme_loader = Arc::new(helix_view::theme::Loader::new(&[]));
         let lang_config = helix_loader::config::default_lang_config();
@@ -1611,7 +1614,8 @@ mod tests {
             helix_core::syntax::Loader::new(lang_config.try_into().unwrap()).unwrap(),
         ));
 
-        let (completion_tx, _) = tokio::sync::mpsc::channel::<helix_view::handlers::completion::CompletionEvent>(1);
+        let (completion_tx, _) =
+            tokio::sync::mpsc::channel::<helix_view::handlers::completion::CompletionEvent>(1);
         let (sig_tx, _) = tokio::sync::mpsc::channel(1);
         let (auto_save_tx, _) = tokio::sync::mpsc::channel(1);
         let (doc_colors_tx, _) = tokio::sync::mpsc::channel(1);

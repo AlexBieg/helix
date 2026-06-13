@@ -46,9 +46,7 @@ pub struct SessionSelection {
 #[serde(rename_all = "kebab-case")]
 pub enum SessionTree {
     /// A leaf node: a single view showing a document at the given index in `documents`.
-    View {
-        document_index: usize,
-    },
+    View { document_index: usize },
     /// A container splitting horizontally or vertically.
     Split {
         layout: SessionLayout,
@@ -107,7 +105,10 @@ mod tests {
 
         assert_eq!(restored.active_document_index, 0);
         assert_eq!(restored.documents.len(), 1);
-        assert_eq!(restored.documents[0].path, Some(PathBuf::from("/tmp/test.rs")));
+        assert_eq!(
+            restored.documents[0].path,
+            Some(PathBuf::from("/tmp/test.rs"))
+        );
         assert_eq!(restored.documents[0].cursor_line, 10);
         assert_eq!(restored.documents[0].cursor_col, 5);
         assert_eq!(restored.documents[0].scroll_line, 5);
@@ -116,7 +117,10 @@ mod tests {
         assert_eq!(restored.documents[0].selections.len(), 1);
         assert_eq!(restored.documents[0].selections[0].anchor_line, 10);
         assert_eq!(restored.documents[0].selections[0].head_col, 8);
-        assert!(matches!(restored.splits, SessionTree::View { document_index: 0 }));
+        assert!(matches!(
+            restored.splits,
+            SessionTree::View { document_index: 0 }
+        ));
         assert_eq!(restored.recent_files, vec![PathBuf::from("/tmp/other.rs")]);
     }
 

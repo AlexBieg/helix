@@ -8,8 +8,8 @@ use crate::ui::document::{LinePos, TextRenderer};
 
 pub use diagnostics::InlineDiagnostics;
 
-mod diagnostics;
 mod blame;
+mod diagnostics;
 
 pub use blame::BlameDecoration;
 

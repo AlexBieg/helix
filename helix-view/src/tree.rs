@@ -675,7 +675,13 @@ impl Tree {
     }
 
     pub fn is_container(&self, id: ViewId) -> bool {
-        matches!(self.nodes.get(id), Some(Node { content: Content::Container(..), .. }))
+        matches!(
+            self.nodes.get(id),
+            Some(Node {
+                content: Content::Container(..),
+                ..
+            })
+        )
     }
 
     pub fn container_layout(&self, id: ViewId) -> Option<Layout> {

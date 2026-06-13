@@ -1,9 +1,6 @@
 use std::io::Write;
 
-use helix_view::{
-    current_ref,
-    editor::FileWatcherConfig,
-};
+use helix_view::{current_ref, editor::FileWatcherConfig};
 
 use crate::test::helpers::{self, AppBuilder};
 
@@ -28,19 +25,30 @@ async fn test_reload_updates_buffer() -> anyhow::Result<()> {
     // Reload via the API directly (bypasses key sequence issues)
     let scrolloff = app.editor.config().scrolloff;
     let view_id = app.editor.tree.focus;
-    let doc = app.editor.documents.get_mut(&app.editor.tree.get(view_id).doc).unwrap();
+    let doc = app
+        .editor
+        .documents
+        .get_mut(&app.editor.tree.get(view_id).doc)
+        .unwrap();
     let view = app.editor.tree.get_mut(view_id);
     doc.reload(view, &app.editor.diff_providers)?;
     view.ensure_cursor_in_view(doc, scrolloff);
 
     // Verify buffer was updated
-    let doc = app.editor.documents.get(&app.editor.tree.get(view_id).doc).unwrap();
+    let doc = app
+        .editor
+        .documents
+        .get(&app.editor.tree.get(view_id).doc)
+        .unwrap();
     let text: String = doc.text().slice(..).chars().collect();
     assert!(
         text.contains("modified externally"),
         "expected 'modified externally', got '{text}'"
     );
-    assert!(!doc.is_modified(), "document should not be marked as modified after reload");
+    assert!(
+        !doc.is_modified(),
+        "document should not be marked as modified after reload"
+    );
 
     Ok(())
 }
@@ -82,8 +90,16 @@ async fn test_reload_resets_modified_flag() -> anyhow::Result<()> {
 
     // After reload, doc should NOT be modified (reload resets the flag)
     let doc = app.editor.documents.get(&doc_id).unwrap();
-    assert!(!doc.is_modified(), "document should not be marked as modified after reload");
-    assert!(doc.text().slice(..).chars().collect::<String>().contains("new content"));
+    assert!(
+        !doc.is_modified(),
+        "document should not be marked as modified after reload"
+    );
+    assert!(doc
+        .text()
+        .slice(..)
+        .chars()
+        .collect::<String>()
+        .contains("new content"));
 
     Ok(())
 }

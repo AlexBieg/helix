@@ -501,9 +501,8 @@ where
     // left after the elements already placed on this row, with a one-column gap
     // before the neighbour and two columns for the surrounding spaces. Only then
     // do we abbreviate — a path that fits is shown in full.
-    let consumed = context.parts.left.width()
-        + context.parts.center.width()
-        + context.parts.right.width();
+    let consumed =
+        context.parts.left.width() + context.parts.center.width() + context.parts.right.width();
     let budget = (context.view.area.width as usize)
         .saturating_sub(consumed + 1)
         .saturating_sub(2);

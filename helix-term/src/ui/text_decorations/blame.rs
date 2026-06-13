@@ -1,7 +1,4 @@
-use helix_core::{
-    doc_formatter::FormattedGrapheme,
-    Position,
-};
+use helix_core::{doc_formatter::FormattedGrapheme, Position};
 use helix_view::{
     graphics::{Color, Modifier, Rect},
     theme::Style,
@@ -30,9 +27,27 @@ impl BlameStyles {
             .try_get_exact("ui.blame.background")
             .unwrap_or_else(|| base.bg(Color::Indexed(235)));
 
-        let commit = styled(theme, "ui.blame.commit", base, Color::Indexed(172), Modifier::BOLD);
-        let author = styled(theme, "ui.blame.author", base, Color::Indexed(68), Modifier::empty());
-        let time = styled(theme, "ui.blame.time", base, Color::Indexed(245), Modifier::DIM);
+        let commit = styled(
+            theme,
+            "ui.blame.commit",
+            base,
+            Color::Indexed(172),
+            Modifier::BOLD,
+        );
+        let author = styled(
+            theme,
+            "ui.blame.author",
+            base,
+            Color::Indexed(68),
+            Modifier::empty(),
+        );
+        let time = styled(
+            theme,
+            "ui.blame.time",
+            base,
+            Color::Indexed(245),
+            Modifier::DIM,
+        );
         let summary = styled(
             theme,
             "ui.blame.summary",

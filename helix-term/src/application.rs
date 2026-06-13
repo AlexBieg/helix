@@ -149,7 +149,10 @@ impl Application {
             match editor.load_session() {
                 Ok(n) if n > 0 => {
                     loaded_session = true;
-                    editor.set_status(format!("Restored {n} file{} from session.", if n == 1 { "" } else { "s" }));
+                    editor.set_status(format!(
+                        "Restored {n} file{} from session.",
+                        if n == 1 { "" } else { "s" }
+                    ));
                 }
                 Ok(_) => {}
                 Err(err) => {
@@ -769,8 +772,7 @@ impl Application {
                     self.editor
                         .set_error(format!("Failed to reload file: {}", e));
                 } else {
-                    self.editor
-                        .set_status("File changed externally, reloaded.");
+                    self.editor.set_status("File changed externally, reloaded.");
                     // Notify LSP
                     if let Some(path) = path_for_lsp {
                         self.editor
@@ -791,8 +793,7 @@ impl Application {
                 for doc_id in doc_ids {
                     if let Some(doc) = self.editor.documents.get_mut(&doc_id) {
                         if let Some(path) = doc.path().map(ToOwned::to_owned) {
-                            if let Some(diff_base) =
-                                self.editor.diff_providers.get_diff_base(&path)
+                            if let Some(diff_base) = self.editor.diff_providers.get_diff_base(&path)
                             {
                                 doc.set_diff_base(diff_base);
                             }
@@ -884,7 +885,9 @@ impl Application {
                     &event,
                     Event::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
                 ) && {
-                    let Event::Mouse(mouse) = &event else { unreachable!() };
+                    let Event::Mouse(mouse) = &event else {
+                        unreachable!()
+                    };
                     cx.editor.dismiss_notification_at(mouse.column, mouse.row)
                 };
                 dismissed || self.compositor.handle_event(&event, &mut cx)

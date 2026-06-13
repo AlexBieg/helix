@@ -92,14 +92,19 @@ impl Notifications {
 
     /// Drop notifications whose auto-dismiss deadline has passed.
     pub fn prune(&mut self, now: Instant) {
-        self.items.retain(|notification| !notification.is_expired(now));
+        self.items
+            .retain(|notification| !notification.is_expired(now));
     }
 
     /// Begin dismissing a single notification by id, fading it out over `fade`
     /// (use `Duration::ZERO` for an immediate removal on the next prune). Returns
     /// whether a matching notification was found.
     pub fn dismiss(&mut self, id: u32, now: Instant, fade: Duration) -> bool {
-        match self.items.iter_mut().find(|notification| notification.id == id) {
+        match self
+            .items
+            .iter_mut()
+            .find(|notification| notification.id == id)
+        {
             Some(notification) => {
                 notification.begin_fade(now, fade);
                 true
@@ -130,10 +135,8 @@ impl Notifications {
     /// contains the given screen cell. Returns whether one was hit.
     pub fn dismiss_at(&mut self, column: u16, row: u16, now: Instant, fade: Duration) -> bool {
         let hit = self.last_rects.iter().find_map(|(id, rect)| {
-            let within = column >= rect.x
-                && column < rect.right()
-                && row >= rect.y
-                && row < rect.bottom();
+            let within =
+                column >= rect.x && column < rect.right() && row >= rect.y && row < rect.bottom();
             within.then_some(*id)
         });
         match hit {
@@ -262,7 +265,10 @@ mod tests {
 
         assert!(n.dismiss_top(now, Duration::ZERO));
         n.prune(now);
-        assert_eq!(n.iter().map(|i| i.text.as_ref()).collect::<Vec<_>>(), vec!["b"]);
+        assert_eq!(
+            n.iter().map(|i| i.text.as_ref()).collect::<Vec<_>>(),
+            vec!["b"]
+        );
 
         n.dismiss_all(now, Duration::ZERO);
         n.prune(now);

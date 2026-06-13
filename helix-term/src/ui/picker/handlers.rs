@@ -146,7 +146,11 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> AsyncHook for DynamicQu
     type Event = DynamicQueryChange;
 
     fn handle_event(&mut self, change: Self::Event, _timeout: Option<Instant>) -> Option<Instant> {
-        let DynamicQueryChange { query, columns, is_paste } = change;
+        let DynamicQueryChange {
+            query,
+            columns,
+            is_paste,
+        } = change;
         if query == self.last_query && columns == self.last_columns {
             // If the search query reverts to the last one we requested, no need to
             // make a new request.
@@ -183,7 +187,13 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> AsyncHook for DynamicQu
             picker.matcher.restart(false);
             let injector = picker.injector();
             let columns = picker.query.all().clone();
-            let get_options = (callback)(&query, &columns, editor, picker.editor_data.clone(), &injector);
+            let get_options = (callback)(
+                &query,
+                &columns,
+                editor,
+                picker.editor_data.clone(),
+                &injector,
+            );
             tokio::spawn(async move {
                 if let Err(err) = get_options.await {
                     log::info!("Dynamic request failed: {err}");

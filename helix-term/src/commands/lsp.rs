@@ -32,7 +32,14 @@ use crate::{
     ui::{self, overlay::overlaid, FileLocation, Picker, Popup, PromptEvent},
 };
 
-use std::{cmp::Ordering, collections::{HashMap, HashSet}, fmt::Display, future::Future, path::Path, sync::Arc};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    future::Future,
+    path::Path,
+    sync::Arc,
+};
 
 /// Gets the first language server that is attached to a document which supports a specific feature.
 /// If there is no configured language server that supports the feature, this displays a status message.
@@ -457,7 +464,11 @@ pub fn workspace_symbol_picker(cx: &mut Context) {
         return;
     }
 
-    let get_symbols = |pattern: &str, _columns: &HashMap<Arc<str>, Arc<str>>, editor: &mut Editor, _data, injector: &Injector<_, _>| {
+    let get_symbols = |pattern: &str,
+                       _columns: &HashMap<Arc<str>, Arc<str>>,
+                       editor: &mut Editor,
+                       _data,
+                       injector: &Injector<_, _>| {
         let doc = doc!(editor);
         let mut seen_language_servers = HashSet::new();
         let mut futures: FuturesUnordered<_> = doc

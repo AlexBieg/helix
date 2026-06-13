@@ -11,8 +11,8 @@ impl FileWatcher {
     pub fn new() -> (Self, mpsc::UnboundedReceiver<PathBuf>) {
         let (events_tx, events_rx) = mpsc::unbounded_channel();
 
-        let watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
-            match res {
+        let watcher =
+            notify::recommended_watcher(move |res: Result<Event, notify::Error>| match res {
                 Ok(event) => {
                     if event.kind.is_modify() {
                         for path in event.paths {
@@ -23,9 +23,8 @@ impl FileWatcher {
                 Err(e) => {
                     log::error!("file watcher error: {:?}", e);
                 }
-            }
-        })
-        .expect("failed to create file watcher");
+            })
+            .expect("failed to create file watcher");
 
         (FileWatcher { _watcher: watcher }, events_rx)
     }
@@ -102,7 +101,10 @@ mod tests {
         std::fs::write(file.path(), "hello modified").unwrap();
 
         let result = poll_for_event(&mut rx, Duration::from_secs(2)).await;
-        assert!(result.is_none(), "should not receive event for unwatched file");
+        assert!(
+            result.is_none(),
+            "should not receive event for unwatched file"
+        );
     }
 
     #[tokio::test]

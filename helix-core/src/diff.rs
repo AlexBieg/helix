@@ -201,7 +201,11 @@ pub fn unified_diff(old: &Rope, new: &Rope, path: &Path) -> String {
         let new_start = hunk.after.start + 1;
         let new_count = hunk.after.len() as u32;
 
-        let _ = writeln!(output, "@@ -{},{} +{},{} @@", old_start, old_count, new_start, new_count);
+        let _ = writeln!(
+            output,
+            "@@ -{},{} +{},{} @@",
+            old_start, old_count, new_start, new_count
+        );
 
         for i in hunk.before.clone() {
             let _ = writeln!(output, "-{}", old_lines.get(i as usize).unwrap_or(&""));

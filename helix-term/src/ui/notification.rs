@@ -91,7 +91,12 @@ pub fn render(viewport: Rect, surface: &mut Surface, cx: &mut Context) {
             (0, false)
         };
 
-        let area = Rect::new(toast.rect.x - shift, toast.rect.y, toast.rect.width, toast.rect.height);
+        let area = Rect::new(
+            toast.rect.x - shift,
+            toast.rect.y,
+            toast.rect.width,
+            toast.rect.height,
+        );
         drawn_rects.push((toast.id, area));
 
         let background = dimmed(base_background, dim);
@@ -99,7 +104,9 @@ pub fn render(viewport: Rect, surface: &mut Surface, cx: &mut Context) {
         let accent = dimmed(accent_style(theme, toast.severity), dim);
 
         surface.clear_with(area, background);
-        let block = Block::bordered().title(toast.title.as_str()).border_style(accent);
+        let block = Block::bordered()
+            .title(toast.title.as_str())
+            .border_style(accent);
         let inner = block.inner(area);
         block.render(area, surface);
 
@@ -186,7 +193,12 @@ fn is_animating(created_at: Instant, expires_at: Option<Instant>, now: Instant) 
 }
 
 /// Columns to shift a toast left of its resting position for the slide effect.
-fn slide_shift(created_at: Instant, expires_at: Option<Instant>, now: Instant, distance: u16) -> u16 {
+fn slide_shift(
+    created_at: Instant,
+    expires_at: Option<Instant>,
+    now: Instant,
+    distance: u16,
+) -> u16 {
     let distance = distance as f32;
     let entering = (1.0 - ease_out_cubic(slide_in_progress(created_at, now))) * distance;
     let leaving = ease_in_cubic(fade_progress(expires_at, now)) * distance;
@@ -376,19 +388,30 @@ mod tests {
         let now = Instant::now();
         let mut n = Notifications::default();
         for (text, severity) in messages {
-            n.push(Cow::Borrowed(*text), *severity, Some(Duration::from_secs(1)), now);
+            n.push(
+                Cow::Borrowed(*text),
+                *severity,
+                Some(Duration::from_secs(1)),
+                now,
+            );
         }
         n
     }
 
     #[test]
     fn wrap_breaks_on_words() {
-        assert_eq!(wrap("the quick brown fox", 9), vec!["the quick", "brown fox"]);
+        assert_eq!(
+            wrap("the quick brown fox", 9),
+            vec!["the quick", "brown fox"]
+        );
     }
 
     #[test]
     fn wrap_breaks_long_words() {
-        assert_eq!(wrap("supercalifragilistic", 5), vec!["super", "calif", "ragil", "istic"]);
+        assert_eq!(
+            wrap("supercalifragilistic", 5),
+            vec!["super", "calif", "ragil", "istic"]
+        );
     }
 
     #[test]
