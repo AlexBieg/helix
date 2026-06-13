@@ -13,7 +13,7 @@ use tui::buffer::Buffer as Surface;
 use crate::compositor::Context;
 
 /// How long the full particle animation lasts.
-pub const DURATION: Duration = Duration::from_millis(300);
+pub const DURATION: Duration = Duration::from_millis(200);
 
 /// Number of particles in the ring.
 const PARTICLE_COUNT: usize = 12;
@@ -81,19 +81,11 @@ pub fn render(
 
     let t = anim.progress(now);
 
-    let expand = ease_out_cubic((t / 0.5).min(1.0));
-    let fade = if t > 0.5 {
-        ease_in_cubic((t - 0.5) / 0.5)
-    } else {
-        0.0
-    };
-
+    let expand = ease_out_cubic(t);
     let radius = START_RADIUS + (MAX_RADIUS - START_RADIUS) * expand;
-    let alpha = 1.0 - fade;
 
     let theme_fg = particle_color(&cx.editor.theme, anim.mode_index);
-    let fg = fade_color(theme_fg, alpha);
-    let style = Style::default().fg(fg);
+    let style = Style::default().fg(theme_fg);
 
     let two_pi = 2.0 * std::f32::consts::PI;
 
@@ -158,28 +150,8 @@ fn particle_color(theme: &helix_view::Theme, mode_index: u8) -> Color {
     }
 }
 
-/// Blend a color toward black based on alpha.
-fn fade_color(color: Color, alpha: f32) -> Color {
-    if alpha >= 1.0 {
-        return color;
-    }
-    let alpha = alpha.clamp(0.0, 1.0);
-    match color {
-        Color::Rgb(r, g, b) => Color::Rgb(
-            (r as f32 * alpha).round() as u8,
-            (g as f32 * alpha).round() as u8,
-            (b as f32 * alpha).round() as u8,
-        ),
-        other => other,
-    }
-}
-
 fn ease_out_cubic(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(3)
-}
-
-fn ease_in_cubic(t: f32) -> f32 {
-    t * t * t
 }
 
 #[cfg(test)]
@@ -207,13 +179,5 @@ mod tests {
         let now = Instant::now();
         let anim = ModeSwitchAnimation::new(now, 10, 5, 0);
         assert_eq!(anim.progress(now + 10 * DURATION), 1.0);
-    }
-
-    #[test]
-    fn fade_color_dims_rgb() {
-        let c = Color::Rgb(200, 100, 50);
-        assert_eq!(fade_color(c, 0.5), Color::Rgb(100, 50, 25));
-        assert_eq!(fade_color(c, 0.0), Color::Rgb(0, 0, 0));
-        assert_eq!(fade_color(c, 1.0), Color::Rgb(200, 100, 50));
     }
 }
