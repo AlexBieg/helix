@@ -7,8 +7,11 @@ use crate::{
     keymap::{KeymapResult, Keymaps},
     ui::{
         document::{render_document, LinePos, TextRenderer},
+        particles::{self, ModeSwitchAnimation},
         statusline,
-        text_decorations::{self, BlameDecoration, Decoration, DecorationManager, InlineDiagnostics},
+        text_decorations::{
+            self, BlameDecoration, Decoration, DecorationManager, InlineDiagnostics,
+        },
         Completion, ProgressSpinners,
     },
 };
@@ -47,6 +50,10 @@ pub struct EditorView {
     /// Per-buffer x-coordinate ranges in the bufferline, populated during render.
     /// Used for mouse click switching.
     bufferline_ranges: Vec<(helix_view::DocumentId, u16, u16)>,
+    /// Active particle animation that plays around the cursor on mode switch.
+    mode_switch_animation: Option<ModeSwitchAnimation>,
+    /// The editor mode during the last render, used to detect mode switches.
+    last_rendered_mode: Mode,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +78,8 @@ impl EditorView {
             spinners: ProgressSpinners::default(),
             terminal_focused: true,
             bufferline_ranges: Vec::new(),
+            mode_switch_animation: None,
+            last_rendered_mode: Mode::Normal,
         }
     }
 
@@ -1712,7 +1721,12 @@ impl Component for EditorView {
         cx.editor.resize(editor_area);
 
         if use_bufferline {
-            Self::render_bufferline(cx.editor, area.with_height(1), surface, &mut self.bufferline_ranges);
+            Self::render_bufferline(
+                cx.editor,
+                area.with_height(1),
+                surface,
+                &mut self.bufferline_ranges,
+            );
         }
 
         for (view, is_focused) in cx.editor.tree.views() {
@@ -1788,6 +1802,33 @@ impl Component for EditorView {
 
         if let Some(completion) = self.completion.as_mut() {
             completion.render(area, surface, cx);
+        }
+
+        // --- Mode switch particle ring animation ---
+        let config = cx.editor.config();
+        let animate = config.mode_switch_animation;
+        drop(config);
+
+        if animate {
+            let current_mode = cx.editor.mode();
+            if current_mode != self.last_rendered_mode && self.mode_switch_animation.is_none() {
+                if let (Some(pos), _) = cx.editor.cursor() {
+                    self.mode_switch_animation = Some(ModeSwitchAnimation::new(
+                        std::time::Instant::now(),
+                        pos.col as u16,
+                        pos.row as u16,
+                        current_mode as u8,
+                    ));
+                }
+            }
+            self.last_rendered_mode = current_mode;
+
+            if self.mode_switch_animation.is_some() {
+                particles::render(area, surface, cx, &mut self.mode_switch_animation);
+            }
+        } else {
+            self.mode_switch_animation = None;
+            self.last_rendered_mode = cx.editor.mode();
         }
     }
 

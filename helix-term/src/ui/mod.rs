@@ -8,6 +8,7 @@ mod markdown;
 pub mod menu;
 pub mod notification;
 pub mod overlay;
+pub(crate) mod particles;
 pub mod picker;
 pub mod popup;
 pub mod prompt;

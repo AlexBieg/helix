@@ -2,6 +2,22 @@
 
 Custom features added on top of upstream Helix.
 
+## 2026-06-13
+
+### Mode-switch particle ring animation
+- Ring of particles emits from cursor when switching editor modes (Normal, Insert, Select)
+- 12 particles expand outward in a circle over 300ms, then fade
+- Uses medium dots (`\u{2022}`, `\u{2981}`, `\u{b7}`, `\u{2726}`) as particle characters
+- Colors match the target mode using `ui.statusline.{normal,insert,select}` theme keys
+  with bright hardcoded fallbacks (blue, green, purple) when themes don't define mode colors
+- Animation state tracked in `EditorView`, triggered on mode change detection during render
+- Continuous redraws at ~30fps while animating
+- Config:
+  ```toml
+  [editor]
+  mode-switch-animation = true   # default: true
+  ```
+
 ## 2025-06-09
 
 ### Automatic file reloading on external changes

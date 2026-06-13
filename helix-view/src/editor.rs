@@ -450,6 +450,10 @@ pub struct Config {
     /// Entrance animation played when a picker opens.
     #[serde(default)]
     pub picker_animation: PickerAnimation,
+    /// Whether to show a particle ring animation around the cursor when
+    /// switching editor modes. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub mode_switch_animation: bool,
 }
 
 /// Entrance animation played when a picker opens.
@@ -1123,6 +1127,10 @@ fn default_file_watcher_debounce() -> u64 {
     DEFAULT_FILE_WATCHER_DEBOUNCE_MS
 }
 
+const fn default_true() -> bool {
+    true
+}
+
 impl Default for FileWatcherConfig {
     fn default() -> Self {
         Self {
@@ -1332,6 +1340,7 @@ impl Default for Config {
             blame: false,
             notifications: NotificationConfig::default(),
             picker_animation: PickerAnimation::default(),
+            mode_switch_animation: true,
         }
     }
 }
