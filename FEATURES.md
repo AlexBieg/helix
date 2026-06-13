@@ -165,3 +165,20 @@ Custom features added on top of upstream Helix.
 - The file name itself is never abbreviated; hidden directories keep their leading dot (`.config` → `.c`)
 - Width budget is computed from the full view width minus what the other elements on the row already consume (so on the second row it shrinks to avoid colliding with `version-control`); for the fit to be exact, place `file-name` in the row's `right` zone (center elements are laid out after it)
 - Pure logic lives in `fit_path`/`abbreviate_segment` in `helix-term/src/ui/statusline.rs`, covered by unit tests
+
+## 2026-06-13
+
+### Picker-normal mode (jk to enter, q to close)
+- Picker `handle_event` now tracks a `jk` key sequence to enter a vim-like "normal" sub-mode within any picker (file picker, symbol picker, buffer picker, etc.)
+- In picker-normal mode, text input to the filter prompt is disabled and a `NORMAL` indicator overlays the prompt area using the `ui.statusline.normal` theme style
+- The cursor changes from a bar (insert-style) to a block (normal-style) positioned at the start of the prompt line
+- Keybindings in picker-normal:
+  - `q` or `Esc` — close the picker
+  - `i` — return to filter mode (resume typing)
+  - `j` / `k` — move selection down/up (vim-style), alongside existing `Tab`/arrows
+  - `Enter` — select item and close
+  - `Ctrl-s` / `Ctrl-v` — open in horizontal/vertical split and close
+  - `Ctrl-t` — toggle preview panel
+- If a lone `j` is pressed followed by any key other than `k`, the `j` is flushed to the filter prompt so typing words containing `j` still works naturally
+- All other keys in picker-normal are consumed silently (no accidental text input)
+- Implemented in the generic `Picker` component in `helix-term/src/ui/picker.rs`

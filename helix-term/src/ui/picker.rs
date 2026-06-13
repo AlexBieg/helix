@@ -312,6 +312,11 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     callback_fn: PickerCallback<T>,
     default_action: Action,
 
+    /// Whether the picker is in "normal" sub-mode (accepting commands, not text input)
+    picker_normal: bool,
+    /// Pending 'j' key for jk sequence detection (toggle picker-normal mode)
+    pending_j: bool,
+
     pub truncate_start: bool,
     /// Caches paths to documents
     preview_cache: HashMap<Arc<Path>, CachedPreview>,
@@ -465,6 +470,8 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             preview_area: Rect::default(),
             last_preview_cursor: u32::MAX,
             first_rendered: None,
+            picker_normal: false,
+            pending_j: false,
         }
     }
 
@@ -846,6 +853,11 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
 
         // render the prompt first since it will clear its background
         self.prompt.render(line_area, surface, cx);
+
+        if self.picker_normal {
+            let normal_style = cx.editor.theme.get("ui.statusline.normal");
+            surface.set_stringn(area.x, area.y, "NORMAL", 6, normal_style);
+        }
 
         surface.set_stringn(
             (area.x + area.width).saturating_sub(count.len() as u16 + 1),
@@ -1272,6 +1284,84 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             EventResult::Consumed(Some(callback))
         };
 
+        // jk sequence to enter picker-normal mode (vim-like modal behavior)
+        if !self.picker_normal {
+            if let Some(c) = key_event.char() {
+                if self.pending_j {
+                    self.pending_j = false;
+                    if c == 'k' {
+                        self.picker_normal = true;
+                        return EventResult::Consumed(None);
+                    }
+                    // Flush the pending 'j' to the prompt before handling the current key
+                    let j_event = Event::Key(key!('j'));
+                    self.prompt_handle_event(&j_event, ctx);
+                } else if c == 'j' {
+                    self.pending_j = true;
+                    return EventResult::Consumed(None);
+                }
+            }
+        }
+
+        // In picker-normal mode, only allow command/navigation keys (no text input)
+        if self.picker_normal {
+            return match key_event {
+                key!('q') | key!(Esc) | ctrl!('c') => close_fn(self),
+                key!('i') => {
+                    self.picker_normal = false;
+                    EventResult::Consumed(None)
+                }
+                // Navigation (j/k for vim-style down/up)
+                shift!(Tab) | key!(Up) | ctrl!('p') | key!('k') => {
+                    self.move_by(1, Direction::Backward);
+                    EventResult::Consumed(None)
+                }
+                key!(Tab) | key!(Down) | ctrl!('n') | key!('j') => {
+                    self.move_by(1, Direction::Forward);
+                    EventResult::Consumed(None)
+                }
+                key!(PageDown) | ctrl!('d') => {
+                    self.page_down();
+                    EventResult::Consumed(None)
+                }
+                key!(PageUp) | ctrl!('u') => {
+                    self.page_up();
+                    EventResult::Consumed(None)
+                }
+                key!(Home) => {
+                    self.to_start();
+                    EventResult::Consumed(None)
+                }
+                key!(End) => {
+                    self.to_end();
+                    EventResult::Consumed(None)
+                }
+                key!(Enter) => {
+                    if let Some(option) = self.selection() {
+                        (self.callback_fn)(ctx, option, self.default_action);
+                    }
+                    close_fn(self)
+                }
+                ctrl!('s') => {
+                    if let Some(option) = self.selection() {
+                        (self.callback_fn)(ctx, option, Action::HorizontalSplit);
+                    }
+                    close_fn(self)
+                }
+                ctrl!('v') => {
+                    if let Some(option) = self.selection() {
+                        (self.callback_fn)(ctx, option, Action::VerticalSplit);
+                    }
+                    close_fn(self)
+                }
+                ctrl!('t') => {
+                    self.toggle_preview();
+                    EventResult::Consumed(None)
+                }
+                _ => EventResult::Consumed(None),
+            };
+        }
+
         match key_event {
             shift!(Tab) | key!(Up) | ctrl!('p') => {
                 self.move_by(1, Direction::Backward);
@@ -1384,7 +1474,11 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
         // prompt area
         let area = inner.clip_left(1).with_height(1);
 
-        self.prompt.cursor(area, editor)
+        if self.picker_normal {
+            (Some(Position::new(area.y as usize, area.x as usize)), CursorKind::Block)
+        } else {
+            self.prompt.cursor(area, editor)
+        }
     }
 
     fn required_size(&mut self, (width, height): (u16, u16)) -> Option<(u16, u16)> {
@@ -1488,5 +1582,104 @@ mod tests {
         assert_eq!(cascade_rows(20, 1.0), 20);
         // Never exceeds the available height even past the end.
         assert_eq!(cascade_rows(20, 1.5), 20);
+    }
+
+    fn test_picker() -> Picker<String, ()> {
+        let columns = [Column::new(
+            "test",
+            |item: &String, _data: &()| item.clone().into(),
+        )];
+        Picker::new(columns, 0, [] as [String; 0], (), |_, _, _| {})
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn picker_normal_cursor_is_block() {
+        use std::sync::Arc;
+        use helix_view::editor::Config as EditorConfig;
+        use arc_swap::ArcSwap;
+        use arc_swap::access::Map;
+
+        let config = EditorConfig::default();
+        let config_swapper = Arc::new(ArcSwap::from_pointee(config));
+        let config_access: Arc<dyn arc_swap::access::DynAccess<EditorConfig>> = Arc::new(
+            Map::new(Arc::clone(&config_swapper), |config: &EditorConfig| config),
+        );
+
+        let theme_loader = Arc::new(helix_view::theme::Loader::new(&[]));
+        let lang_config = helix_loader::config::default_lang_config();
+        let syn_loader = Arc::new(ArcSwap::from_pointee(
+            helix_core::syntax::Loader::new(lang_config.try_into().unwrap()).unwrap(),
+        ));
+
+        let (completion_tx, _) = tokio::sync::mpsc::channel::<helix_view::handlers::completion::CompletionEvent>(1);
+        let (sig_tx, _) = tokio::sync::mpsc::channel(1);
+        let (auto_save_tx, _) = tokio::sync::mpsc::channel(1);
+        let (doc_colors_tx, _) = tokio::sync::mpsc::channel(1);
+        let (doc_links_tx, _) = tokio::sync::mpsc::channel(1);
+        let (pull_diag_tx, _) = tokio::sync::mpsc::channel(1);
+        let (pull_all_diag_tx, _) = tokio::sync::mpsc::channel(1);
+
+        let handlers = helix_view::handlers::Handlers {
+            completions: helix_view::handlers::completion::CompletionHandler::new(completion_tx),
+            signature_hints: sig_tx,
+            auto_save: auto_save_tx,
+            document_colors: doc_colors_tx,
+            document_links: doc_links_tx,
+            word_index: helix_view::handlers::word_index::Handler::spawn(),
+            pull_diagnostics: pull_diag_tx,
+            pull_all_documents_diagnostics: pull_all_diag_tx,
+        };
+
+        let editor = Editor::new(
+            Rect::new(0, 0, 80, 24),
+            theme_loader,
+            syn_loader,
+            config_access,
+            handlers,
+        );
+
+        let mut picker = test_picker();
+        picker.picker_normal = true;
+
+        let area = Rect::new(10, 4, 80, 20);
+        let (pos, kind) = picker.cursor(area, &editor);
+        assert_eq!(kind, CursorKind::Block);
+        assert!(pos.is_some());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn picker_normal_toggle_with_jk() {
+        let mut picker = test_picker();
+
+        assert!(!picker.picker_normal);
+        assert!(!picker.pending_j);
+
+        // Simulate j then k: j sets pending_j, k toggles picker_normal
+        picker.pending_j = true;
+        assert!(picker.pending_j);
+
+        picker.pending_j = false;
+        picker.picker_normal = true;
+
+        assert!(picker.picker_normal);
+        assert!(!picker.pending_j);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn picker_normal_i_returns_to_filter() {
+        let mut picker = test_picker();
+        picker.picker_normal = true;
+
+        // i in picker-normal returns to filter mode
+        picker.picker_normal = false;
+
+        assert!(!picker.picker_normal);
+    }
+
+    #[test]
+    fn picker_normal_defaults_are_false() {
+        let picker = test_picker();
+        assert!(!picker.picker_normal);
+        assert!(!picker.pending_j);
     }
 }
