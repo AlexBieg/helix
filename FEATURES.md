@@ -109,9 +109,9 @@ Custom features added on top of upstream Helix.
   - `none` — no animation
   - `unfold` — grow from one row down to full height
   - `unfold-horizontal` — grow from the center out to full width
-   - `unfold-both` — grow from the center out in both dimensions, a zoom/iris
-   - `cascade` — reveal result rows top-to-bottom
-   - (default: `none`)
+  - `unfold-both` — grow from the center out in both dimensions, a zoom/iris
+  - `cascade` — reveal result rows top-to-bottom
+  - (default: `none`)
 - The picker unfolds and cascade animate geometry, so they are theme-independent; only color-based effects (the notification fade) require RGB theme colors and degrade gracefully on named/indexed palettes
 - Config:
   ```toml
