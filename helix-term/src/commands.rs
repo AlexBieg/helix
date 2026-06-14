@@ -491,6 +491,7 @@ impl MappableCommand {
         commit_undo_checkpoint, "Commit changes to new checkpoint",
         yank, "Yank selection",
         yank_to_clipboard, "Yank selections to clipboard",
+        copy_buffer_path, "Copy file path to system clipboard",
         yank_to_primary_clipboard, "Yank selections to primary clipboard",
         yank_joined, "Join and yank selections",
         yank_joined_to_clipboard, "Join and yank selections to clipboard",
@@ -5364,6 +5365,21 @@ fn yank(cx: &mut Context) {
 fn yank_to_clipboard(cx: &mut Context) {
     yank_impl(cx.editor, '+');
     exit_select_mode(cx);
+}
+
+fn copy_buffer_path(cx: &mut Context) {
+    let path = match doc!(cx.editor).path() {
+        Some(abs_path) => abs_path
+            .strip_prefix(&find_workspace().0)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| abs_path.to_string_lossy().into_owned()),
+        None => String::from("[scratch]"),
+    };
+
+    match cx.editor.registers.write('+', vec![path.clone()]) {
+        Ok(_) => cx.editor.set_status(format!("Copied path to clipboard: {path}")),
+        Err(err) => cx.editor.set_error(err.to_string()),
+    }
 }
 
 fn yank_to_primary_clipboard(cx: &mut Context) {

@@ -7,6 +7,7 @@ use crate::job::Job;
 use super::*;
 
 use helix_core::command_line::{Args, Flag, Signature, Token, TokenKind};
+use helix_core::find_workspace;
 use helix_core::fuzzy::fuzzy_match;
 use helix_core::indent::MAX_INDENT;
 use helix_core::line_ending;
@@ -1067,6 +1068,31 @@ fn theme(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         }
     };
 
+    Ok(())
+}
+
+fn copy_buffer_path(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    let path = match doc!(cx.editor).path() {
+        Some(abs_path) => abs_path
+            .strip_prefix(&find_workspace().0)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| abs_path.to_string_lossy().into_owned()),
+        None => String::from("[scratch]"),
+    };
+
+    cx.editor
+        .registers
+        .write('+', vec![path.clone()])?;
+    cx.editor
+        .set_status(format!("Copied path to clipboard: {path}"));
     Ok(())
 }
 
@@ -3508,6 +3534,17 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         aliases: &[],
         doc: "Show clipboard provider name in status bar.",
         fun: show_clipboard_provider,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "copy-buffer-path",
+        aliases: &[],
+        doc: "Copy the current buffer's file path to the system clipboard.",
+        fun: copy_buffer_path,
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (0, Some(0)),

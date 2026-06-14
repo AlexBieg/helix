@@ -2,6 +2,14 @@
 
 Custom features added on top of upstream Helix.
 
+## 2026-06-14
+
+### Copy buffer file path to clipboard
+- New `:copy-buffer-path` typed command and `copy_buffer_path` static command
+- Copies the current buffer's file path (relative to workspace root) to the system clipboard
+- Falls back to absolute path when file is outside the workspace; uses `[scratch]` for scratch buffers
+- Bindable to a key, e.g. `"C-c" = "copy_buffer_path"`
+
 ## 2026-06-13
 
 ### Mode-switch particle ring animation
