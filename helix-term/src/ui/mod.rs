@@ -5,6 +5,7 @@ pub(crate) mod editor;
 mod info;
 pub mod lsp;
 mod markdown;
+mod markdown_inline;
 pub mod menu;
 pub mod notification;
 pub mod overlay;

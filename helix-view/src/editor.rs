@@ -454,6 +454,12 @@ pub struct Config {
     /// switching editor modes. Defaults to `true`.
     #[serde(default = "default_true")]
     pub mode_switch_animation: bool,
+    /// Whether to render markdown formatting inline on the source text.
+    /// Syntax markers (`#`, `**`, `` ` ``) are dimmed while content
+    /// (headings, bold/italic, code, links) receives styling.
+    /// Defaults to `false`.
+    #[serde(default)]
+    pub inline_markdown: bool,
 }
 
 /// Entrance animation played when a picker opens.
@@ -1341,6 +1347,7 @@ impl Default for Config {
             notifications: NotificationConfig::default(),
             picker_animation: PickerAnimation::default(),
             mode_switch_animation: true,
+            inline_markdown: false,
         }
     }
 }

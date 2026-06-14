@@ -38,6 +38,8 @@ use std::{mem::take, num::NonZeroUsize, ops, path::PathBuf, rc::Rc};
 
 use tui::{buffer::Buffer as Surface, text::Span};
 
+use crate::ui::markdown_inline;
+
 pub struct EditorView {
     pub keymaps: Keymaps,
     on_next_key: Option<(OnKeyCallback, OnKeyCallbackKind)>,
@@ -157,6 +159,38 @@ impl EditorView {
         }
 
         Self::doc_diagnostics_highlights_into(doc, theme, &mut overlays);
+
+        if config.inline_markdown
+            && markdown_inline::is_markdown_language(doc.language_id())
+        {
+            let (overlay, code_block_lines) =
+                markdown_inline::inline_markdown_overlays(doc.text().slice(..), theme);
+            if let Some(overlay) = overlay {
+                overlays.push(overlay);
+            }
+            if !code_block_lines.is_empty() {
+                let code_bg = theme.get("markup.raw.block");
+                if code_bg.bg.is_some() {
+                    let code_line_ranges: Vec<_> = code_block_lines;
+                    decorations.add_decoration(move |renderer: &mut TextRenderer, pos: LinePos| {
+                        if code_line_ranges
+                            .iter()
+                            .any(|r| r.contains(&pos.doc_line))
+                        {
+                            renderer.set_style(
+                                Rect::new(
+                                    0,
+                                    pos.visual_line,
+                                    renderer.viewport.width,
+                                    1,
+                                ),
+                                code_bg,
+                            );
+                        }
+                    });
+                }
+            }
+        }
 
         if is_focused {
             if config.lsp.auto_document_highlight {
