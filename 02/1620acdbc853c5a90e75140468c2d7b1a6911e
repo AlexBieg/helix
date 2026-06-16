@@ -1,0 +1,25 @@
+helix-term/tests/test/commands/write.rs
+  s_74bddfe7478f6a::t_addea771b35405 882
+helix-term/tests/test/helpers.rs
+  s_74bddfe7478f6a::t_addea771b35405 73,451
+helix-term/src/compositor.rs
+  s_74bddfe7478f6a::t_addea771b35405 185-186,188-190
+helix-term/src/ui/editor.rs
+  s_74bddfe7478f6a::t_addea771b35405 50-51,82,173,611-612,666-668,686-688,694-696,1837-1842
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "021620acdbc853c5a90e75140468c2d7b1a6911e",
+  "prompts": {},
+  "sessions": {
+    "s_74bddfe7478f6a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "23553ada-b508-430e-b39f-96765157c6de",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Alex Bieg <alexbieg-hw@users.noreply.github.com>"
+    }
+  }
+}
