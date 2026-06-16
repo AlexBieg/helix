@@ -552,7 +552,7 @@ impl Default for NotificationTimeouts {
             hint: 2000,
             info: 3000,
             warning: 5000,
-            error: 0,
+            error: 10000,
         }
     }
 }

@@ -119,7 +119,7 @@ Custom features added on top of upstream Helix.
 
 ### Popup notifications (toasts)
 - Status, warning, and error messages now appear as color-coded popups ("toasts") stacked in the top-right corner, in addition to being mirrored on the status line
-- Severity-scaled auto-dismiss (hint 2s, info 3s, warning 5s, error sticky by default); identical consecutive messages coalesce with a `(×N)` counter; the stack collapses to a `+N more` indicator past `max-visible`
+- Severity-scaled auto-dismiss (hint 2s, info 3s, warning 5s, error 10s; set a severity to `0` to make it sticky); identical consecutive messages coalesce with a `(×N)` counter; the stack collapses to a `+N more` indicator past `max-visible`
 - Dismiss without leaving your current mode: `Space N` (`dismiss_notifications`) clears the stack, `dismiss_notification` clears the most recent (unbound by default), or click a toast to close it
 - `:notify [-s|--severity hint|info|warning|error] [-r|--repeat N] <message>` shows a notification by hand (handy for testing and theming; `\n` in the message wraps to multiple lines)
 - Styled via `ui.notification` / `ui.notification.{error,warning,info,hint}`, falling back to `ui.popup` and the existing severity scopes
@@ -131,7 +131,7 @@ Custom features added on top of upstream Helix.
   max-visible = 5
   animate = true
   # 0 = sticky (dismiss manually)
-  timeout = { hint = 2000, info = 3000, warning = 5000, error = 0 }
+  timeout = { hint = 2000, info = 3000, warning = 5000, error = 10000 }
   ```
 
 ### UI entrance animations

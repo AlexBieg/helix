@@ -570,7 +570,7 @@ close it. Trigger one manually with `:notify` (e.g. `:notify -s warning hello`).
 | `enable`      | Whether to show popup notifications. When disabled, messages only appear on the status line | `true`  |
 | `max-visible` | Maximum number of notifications shown at once; the rest collapse into a `+N more` indicator | `5`     |
 | `animate`     | Whether to animate notifications                                            | `true`  |
-| `timeout`     | Auto-dismiss timeouts in milliseconds per severity. `0` means sticky (dismissed only by the user) | `{ hint = 2000, info = 3000, warning = 5000, error = 0 }` |
+| `timeout`     | Auto-dismiss timeouts in milliseconds per severity. `0` means sticky (dismissed only by the user) | `{ hint = 2000, info = 3000, warning = 5000, error = 10000 }` |
 
 Example:
 
