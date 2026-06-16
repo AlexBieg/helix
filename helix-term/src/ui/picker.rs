@@ -1217,7 +1217,7 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             && area.height > MIN_AREA_HEIGHT_FOR_PREVIEW;
 
         let picker_height = if render_preview {
-            area.height / 2
+            area.height / 3
         } else {
             area.height
         };
