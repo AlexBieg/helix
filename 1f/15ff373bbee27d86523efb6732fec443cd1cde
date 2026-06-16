@@ -1,0 +1,23 @@
+book/src/editor.md
+  s_0f2002ee27ad4b::t_cdc8cb1c30b29a 573
+FEATURES.md
+  s_0f2002ee27ad4b::t_cdc8cb1c30b29a 122,134
+helix-view/src/editor.rs
+  s_0f2002ee27ad4b::t_cdc8cb1c30b29a 555
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "1f15ff373bbee27d86523efb6732fec443cd1cde",
+  "prompts": {},
+  "sessions": {
+    "s_0f2002ee27ad4b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "07aac221-8f2e-42ab-a115-db8295b77b2d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Alex Bieg <alexbieg-hw@users.noreply.github.com>"
+    }
+  }
+}
