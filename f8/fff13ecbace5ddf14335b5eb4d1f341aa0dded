@@ -1,0 +1,19 @@
+helix-term/src/ui/picker.rs
+  s_d2d02717a77a8a::t_fbffd6973e5ac3 1220
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "f8fff13ecbace5ddf14335b5eb4d1f341aa0dded",
+  "prompts": {},
+  "sessions": {
+    "s_d2d02717a77a8a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8f422d62-c753-4a51-af24-fa368a9bc883",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Alex Bieg <alexbieg-hw@users.noreply.github.com>"
+    }
+  }
+}
