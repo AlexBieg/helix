@@ -1950,10 +1950,10 @@ fn switch_to_lowercase(cx: &mut Context) {
     });
 }
 
-pub fn scroll(cx: &mut Context, offset: usize, direction: Direction, sync_cursor: bool) {
+pub fn scroll(editor: &mut Editor, offset: usize, direction: Direction, sync_cursor: bool) {
     use Direction::*;
-    let config = cx.editor.config();
-    let (view, doc) = current!(cx.editor);
+    let config = editor.config();
+    let (view, doc) = current!(editor);
     let mut view_offset = doc.view_offset(view.id);
 
     let range = doc.selection(view.id).primary();
@@ -1986,7 +1986,7 @@ pub fn scroll(cx: &mut Context, offset: usize, direction: Direction, sync_cursor
     let mut annotations = view.text_annotations(&*doc, None);
 
     if sync_cursor {
-        let movement = match cx.editor.mode {
+        let movement = match editor.mode {
             Mode::Select => Movement::Extend,
             _ => Movement::Move,
         };
@@ -2045,7 +2045,7 @@ pub fn scroll(cx: &mut Context, offset: usize, direction: Direction, sync_cursor
         }
     }
 
-    let anchor = if cx.editor.mode == Mode::Select {
+    let anchor = if editor.mode == Mode::Select {
         range.anchor
     } else {
         head
@@ -2063,49 +2063,49 @@ pub fn scroll(cx: &mut Context, offset: usize, direction: Direction, sync_cursor
 fn page_up(cx: &mut Context) {
     let view = view!(cx.editor);
     let offset = view.inner_height();
-    scroll(cx, offset, Direction::Backward, false);
+    scroll(cx.editor, offset, Direction::Backward, false);
 }
 
 fn page_down(cx: &mut Context) {
     let view = view!(cx.editor);
     let offset = view.inner_height();
-    scroll(cx, offset, Direction::Forward, false);
+    scroll(cx.editor, offset, Direction::Forward, false);
 }
 
 fn half_page_up(cx: &mut Context) {
     let view = view!(cx.editor);
     let offset = view.inner_height() / 2;
-    scroll(cx, offset, Direction::Backward, false);
+    scroll(cx.editor, offset, Direction::Backward, false);
 }
 
 fn half_page_down(cx: &mut Context) {
     let view = view!(cx.editor);
     let offset = view.inner_height() / 2;
-    scroll(cx, offset, Direction::Forward, false);
+    scroll(cx.editor, offset, Direction::Forward, false);
 }
 
 fn page_cursor_up(cx: &mut Context) {
     let view = view!(cx.editor);
     let offset = view.inner_height();
-    scroll(cx, offset, Direction::Backward, true);
+    scroll(cx.editor, offset, Direction::Backward, true);
 }
 
 fn page_cursor_down(cx: &mut Context) {
     let view = view!(cx.editor);
     let offset = view.inner_height();
-    scroll(cx, offset, Direction::Forward, true);
+    scroll(cx.editor, offset, Direction::Forward, true);
 }
 
 fn page_cursor_half_up(cx: &mut Context) {
     let view = view!(cx.editor);
     let offset = view.inner_height() / 2;
-    scroll(cx, offset, Direction::Backward, true);
+    scroll(cx.editor, offset, Direction::Backward, true);
 }
 
 fn page_cursor_half_down(cx: &mut Context) {
     let view = view!(cx.editor);
     let offset = view.inner_height() / 2;
-    scroll(cx, offset, Direction::Forward, true);
+    scroll(cx.editor, offset, Direction::Forward, true);
 }
 
 #[allow(deprecated)]
@@ -6701,11 +6701,13 @@ fn align_view_middle(cx: &mut Context) {
 }
 
 fn scroll_up(cx: &mut Context) {
-    scroll(cx, cx.count(), Direction::Backward, false);
+    let count = cx.count();
+    scroll(cx.editor, count, Direction::Backward, false);
 }
 
 fn scroll_down(cx: &mut Context) {
-    scroll(cx, cx.count(), Direction::Forward, false);
+    let count = cx.count();
+    scroll(cx.editor, count, Direction::Forward, false);
 }
 
 fn goto_ts_object_impl(cx: &mut Context, object: &'static str, direction: Direction) {

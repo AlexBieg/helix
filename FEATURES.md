@@ -2,6 +2,14 @@
 
 Custom features added on top of upstream Helix.
 
+## 2026-06-16
+
+### Smooth, responsive mouse-wheel scrolling
+- Fast or sustained mouse-wheel scrolling no longer stutters, freezes, or lags behind input
+- The main event loop now coalesces queued terminal events, processing a burst in a single render pass instead of one render per event; the drain is bounded to ~16ms so sustained input still redraws at ~60fps. Events are drained with `poll_fn` (the real task waker), not `now_or_never` — termina's `EventStream` registers its wake task on the first `Pending` poll, so a noop-waker poll would leave the real waker unregistered and hang the editor
+- `EditorView` no longer scrolls per wheel event: the mouse handler just accumulates `pending_scroll` (signed lines) and the cursor position, and `apply_pending_scroll` applies the net as a single `commands::scroll` at the start of `render`. Per-frame work is bounded regardless of how many events are buffered, so the view tracks the wheel instead of rushing to the document edge
+- `commands::scroll` now takes `&mut Editor` instead of `&mut commands::Context` (it only ever used `cx.editor`); keyboard scroll commands are unchanged and still scroll synchronously
+
 ## 2026-06-14
 
 ### Copy buffer file path to clipboard

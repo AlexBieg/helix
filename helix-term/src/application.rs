@@ -332,7 +332,35 @@ impl Application {
                     };
                 }
                 Some(event) = input_stream.next() => {
-                    self.handle_terminal_events(event).await;
+                    let mut should_redraw = self.handle_terminal_events(event);
+
+                    // Coalesce any input events that are already queued so a burst
+                    // of events (e.g. rapid mouse-wheel scrolling) is processed in a
+                    // single render pass instead of one expensive render per event.
+                    // We poll the stream with the real task waker (via poll_fn) rather
+                    // than `now_or_never`: termina's EventStream registers its wake task
+                    // on the *first* `Pending` poll, so a noop-waker poll would leave the
+                    // real waker unregistered and hang the editor.
+                    //
+                    // Bound the drain to a single frame's worth of time so a sustained
+                    // burst (holding scroll) still renders at ~60fps instead of freezing
+                    // the view until the burst ends; remaining events are picked up on
+                    // the next loop iteration.
+                    let coalesce_deadline = Instant::now() + std::time::Duration::from_millis(16);
+                    while !self.editor.should_close() && Instant::now() < coalesce_deadline {
+                        let poll = std::future::poll_fn(|cx| {
+                            std::task::Poll::Ready(input_stream.poll_next_unpin(cx))
+                        })
+                        .await;
+                        let std::task::Poll::Ready(Some(event)) = poll else {
+                            break;
+                        };
+                        should_redraw |= self.handle_terminal_events(event);
+                    }
+
+                    if should_redraw && !self.editor.should_close() {
+                        self.render().await;
+                    }
                 }
                 Some(callback) = self.jobs.callbacks.recv() => {
                     self.jobs.handle_callback(&mut self.editor, &mut self.compositor, Ok(Some(callback)));
@@ -808,7 +836,7 @@ impl Application {
         false
     }
 
-    pub async fn handle_terminal_events(&mut self, event: std::io::Result<TerminalEvent>) {
+    pub fn handle_terminal_events(&mut self, event: std::io::Result<TerminalEvent>) -> bool {
         #[cfg(not(windows))]
         use termina::escape::csi;
 
@@ -894,9 +922,7 @@ impl Application {
             }
         };
 
-        if should_redraw && !self.editor.should_close() {
-            self.render().await;
-        }
+        should_redraw && !self.editor.should_close()
     }
 
     pub async fn handle_language_server_message(

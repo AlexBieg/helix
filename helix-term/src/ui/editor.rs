@@ -56,6 +56,14 @@ pub struct EditorView {
     mode_switch_animation: Option<ModeSwitchAnimation>,
     /// The editor mode during the last render, used to detect mode switches.
     last_rendered_mode: Mode,
+    /// Accumulated mouse-wheel scroll (in lines; positive = forward/down) not yet
+    /// applied. Wheel events only add to this; the net scroll is applied once per
+    /// frame in `render` so a fast burst collapses into a single scroll operation
+    /// instead of one per event.
+    pending_scroll: isize,
+    /// Screen coordinates of the most recent pending wheel event, used to pick the
+    /// view to scroll when the accumulated scroll is applied.
+    pending_scroll_pos: Option<(u16, u16)>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +91,8 @@ impl EditorView {
             bufferline_ranges: Vec::new(),
             mode_switch_animation: None,
             last_rendered_mode: Mode::Normal,
+            pending_scroll: 0,
+            pending_scroll_pos: None,
         }
     }
 
@@ -1271,6 +1281,39 @@ impl EditorView {
         self.pseudo_pending.clear();
     }
 
+    /// Apply mouse-wheel scroll accumulated since the last frame as a single
+    /// scroll operation. See [`Self::pending_scroll`].
+    fn apply_pending_scroll(&mut self, editor: &mut Editor) {
+        if self.pending_scroll == 0 {
+            return;
+        }
+
+        let offset = self.pending_scroll.unsigned_abs();
+        let direction = if self.pending_scroll > 0 {
+            Direction::Forward
+        } else {
+            Direction::Backward
+        };
+        self.pending_scroll = 0;
+
+        let Some((row, column)) = self.pending_scroll_pos.take() else {
+            return;
+        };
+        let view_under_cursor = editor.tree.views().find_map(|(view, _focus)| {
+            view.pos_at_screen_coords(&editor.documents[&view.doc], row, column, false)
+                .map(|_| view.id)
+        });
+        let Some(view_id) = view_under_cursor else {
+            return;
+        };
+
+        let current_view = editor.tree.focus;
+        editor.tree.focus = view_id;
+        commands::scroll(editor, offset, direction, false);
+        editor.tree.focus = current_view;
+        editor.ensure_cursor_in_view(current_view);
+    }
+
     fn handle_mouse_event(
         &mut self,
         event: &MouseEvent,
@@ -1395,24 +1438,21 @@ impl EditorView {
             }
 
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                let current_view = cxt.editor.tree.focus;
-
-                let direction = match event.kind {
-                    MouseEventKind::ScrollUp => Direction::Backward,
-                    MouseEventKind::ScrollDown => Direction::Forward,
-                    _ => unreachable!(),
-                };
-
-                match pos_and_view(cxt.editor, row, column, false) {
-                    Some((_, view_id)) => cxt.editor.tree.focus = view_id,
-                    None => return EventResult::Ignored(None),
+                if pos_and_view(cxt.editor, row, column, false).is_none() {
+                    return EventResult::Ignored(None);
                 }
 
-                let offset = config.scroll_lines.unsigned_abs();
-                commands::scroll(cxt, offset, direction, false);
-
-                cxt.editor.tree.focus = current_view;
-                cxt.editor.ensure_cursor_in_view(current_view);
+                // Accumulate the scroll and apply the net amount once per frame in
+                // `render`. This keeps a fast wheel burst responsive: a backlog of
+                // events collapses into a single scroll + redraw instead of one
+                // expensive scroll per event.
+                let lines = config.scroll_lines.unsigned_abs() as isize;
+                self.pending_scroll += match event.kind {
+                    MouseEventKind::ScrollUp => -lines,
+                    MouseEventKind::ScrollDown => lines,
+                    _ => unreachable!(),
+                };
+                self.pending_scroll_pos = Some((row, column));
 
                 EventResult::Consumed(None)
             }
@@ -1700,6 +1740,8 @@ impl Component for EditorView {
     }
 
     fn render(&mut self, area: Rect, surface: &mut Surface, cx: &mut Context) {
+        self.apply_pending_scroll(cx.editor);
+
         // clear with background color
         surface.set_style(area, cx.editor.theme.get("ui.background"));
         let config = cx.editor.config();
