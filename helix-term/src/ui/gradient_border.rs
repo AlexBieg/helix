@@ -73,7 +73,7 @@ impl GradientBorder {
         }
     }
 
-    fn get_gradient_color(&self, x: u16, y: u16, area: Rect) -> Color {
+    fn get_gradient_color(&mut self, x: u16, y: u16, area: Rect) -> Color {
         let start_color = self.start_rgb;
         let end_color = self.end_rgb;
 
@@ -209,6 +209,18 @@ impl GradientBorder {
         }
 
         Self::new(border_config)
+    }
+
+    /// Static helper to get a color at a given ratio from a config, without
+    /// creating a full GradientBorder instance.
+    pub fn interpolate_from_config(config: &GradientBorderConfig, ratio: f32) -> Color {
+        let (start, end, middle) = Self::compute_cached_colors(config);
+        let ratio = ratio.clamp(0.0, 1.0);
+        if let Some(mid) = middle {
+            Self::interpolate_three_colors(start, mid, end, ratio)
+        } else {
+            Self::interpolate_color(start, end, ratio)
+        }
     }
 }
 

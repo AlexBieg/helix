@@ -7,6 +7,7 @@ use crate::{
     keymap::{KeymapResult, Keymaps},
     ui::{
         document::{render_document, LinePos, TextRenderer},
+        gradient_border::GradientBorder,
         particles::{self, ModeSwitchAnimation},
         statusline,
         text_decorations::{
@@ -786,7 +787,8 @@ impl EditorView {
                 .to_str()
                 .unwrap_or_default();
 
-            let style = if current_doc == doc.id() {
+            let is_active = current_doc == doc.id();
+            let style = if is_active {
                 bufferline_active
             } else {
                 bufferline_inactive
@@ -797,9 +799,30 @@ impl EditorView {
             let rem_width = surface.area.width.saturating_sub(used_width);
 
             let start_x = x;
-            x = surface
-                .set_stringn(x, viewport.y, &text, rem_width as usize, style)
-                .0;
+
+            if is_active && editor.config().gradient_borders.enable {
+                let text_width = text.chars().count().min(rem_width as usize);
+                for (i, ch) in text.chars().take(text_width).enumerate() {
+                    let ratio = if text_width > 1 {
+                        i as f32 / (text_width - 1) as f32
+                    } else {
+                        0.0
+                    };
+                    let color = GradientBorder::interpolate_from_config(
+                        &editor.config().gradient_borders,
+                        ratio,
+                    );
+                    let cell_style = style.bg(color);
+                    if let Some(cell) = surface.get_mut(x + i as u16, viewport.y) {
+                        cell.set_symbol(&ch.to_string()).set_style(cell_style);
+                    }
+                }
+                x = (x + text_width as u16).min(surface.area.right());
+            } else {
+                x = surface
+                    .set_stringn(x, viewport.y, &text, rem_width as usize, style)
+                    .0;
+            }
             ranges.push((doc.id(), start_x, x));
 
             if x >= surface.area.right() {
