@@ -4,6 +4,40 @@ Custom features added on top of upstream Helix.
 
 ## 2026-06-16
 
+### Gradient borders for pickers, notifications, and info popups
+- Added `GradientBorder` rendering module (`helix-term/src/ui/gradient_border.rs`) supporting configurable color gradients on UI borders
+- **Picker borders**: file picker, symbol picker, and all other picker panels now render gradient-colored borders when enabled
+- **Notification borders**: severity-aware gradient colors — errors glow red, warnings amber, info blue, hints gray
+- **Info popup borders**: keymap hint popups (triggered by `Space`, `g`, etc.) also use gradient borders
+- **Border thickness**: configurable from 1–5 (thin, thick, double, block, full-block)
+- **Gradient directions**: horizontal, vertical, diagonal, and radial
+- **Color animation**: optional animated gradient cycling with configurable speed (0–10)
+- **Rounded corners**: gradient borders respect the existing `rounded-corners` config (thickness 1 only)
+- Config:
+  ```toml
+  [editor.gradient-borders]
+  enable = true
+  thickness = 1              # 1-5
+  direction = "horizontal"    # horizontal, vertical, diagonal, radial
+  start-color = "#8A2BE2"
+  end-color = "#00BFFF"
+  middle-color = ""           # optional 3rd color
+  animation-speed = 0         # 0-10, 0 = disabled
+
+  [editor.notifications]
+  gradient = true
+
+  [editor.notifications.gradient-colors]
+  error-start = "#FF0000"
+  error-end = "#8B0000"
+  warning-start = "#FFAA00"
+  warning-end = "#8B6914"
+  info-start = "#4488FF"
+  info-end = "#88BBFF"
+  hint-start = "#AAAAAA"
+  hint-end = "#444444"
+  ```
+
 ### Smooth, responsive mouse-wheel scrolling
 - Fast or sustained mouse-wheel scrolling no longer stutters, freezes, or lags behind input
 - The main event loop now coalesces queued terminal events, processing a burst in a single render pass instead of one render per event; the drain is bounded to ~16ms so sustained input still redraws at ~60fps. Events are drained with `poll_fn` (the real task waker), not `now_or_never` — termina's `EventStream` registers its wake task on the first `Pending` poll, so a noop-waker poll would leave the real waker unregistered and hang the editor

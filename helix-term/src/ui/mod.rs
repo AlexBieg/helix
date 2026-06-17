@@ -2,6 +2,7 @@ pub mod animation;
 mod completion;
 mod document;
 pub(crate) mod editor;
+pub mod gradient_border;
 mod info;
 pub mod lsp;
 mod markdown;

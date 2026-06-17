@@ -9,6 +9,8 @@ use tui::buffer::Buffer as Surface;
 use tui::widgets::{Block, Widget};
 
 use crate::compositor::Context;
+use crate::ui::gradient_border::GradientBorder;
+use helix_view::editor::GradientBorderConfig;
 
 const MIN_BOX_WIDTH: u16 = 30;
 const MAX_BOX_WIDTH: u16 = 50;
@@ -49,6 +51,8 @@ pub fn render(viewport: Rect, surface: &mut Surface, cx: &mut Context) {
     let enabled = config.notifications.enable;
     let animate = config.notifications.animate;
     let max_visible = config.notifications.max_visible.max(1);
+    let gradient = config.notifications.gradient;
+    let gradient_colors = config.notifications.gradient_colors.clone();
     let use_bufferline = match config.bufferline {
         helix_view::editor::BufferLine::Always => true,
         helix_view::editor::BufferLine::Multiple => cx.editor.documents.len() > 1,
@@ -104,11 +108,51 @@ pub fn render(viewport: Rect, surface: &mut Surface, cx: &mut Context) {
         let accent = dimmed(accent_style(theme, toast.severity), dim);
 
         surface.clear_with(area, background);
-        let block = Block::bordered()
-            .title(toast.title.as_str())
-            .border_style(accent);
-        let inner = block.inner(area);
-        block.render(area, surface);
+
+        let inner = if gradient {
+            let (start, end) = gradient_for_severity(&gradient_colors, toast.severity);
+            let gradient_config = GradientBorderConfig {
+                enable: true,
+                thickness: 1,
+                direction: Default::default(),
+                start_color: start,
+                end_color: end,
+                middle_color: String::new(),
+                animation_speed: 0,
+            };
+            let mut gb = GradientBorder::new(gradient_config);
+            gb.render(area, surface, theme, false);
+
+            let inner = Rect {
+                x: area.x + 1,
+                y: area.y + 1,
+                width: area.width.saturating_sub(2),
+                height: area.height.saturating_sub(2),
+            };
+
+            // Render title in top border
+            let title = toast.title.as_str();
+            if !title.is_empty() && area.width > title.len() as u16 + 2 {
+                let title_start = area.x + 1;
+                for (i, ch) in title.chars().enumerate() {
+                    let x = title_start + i as u16;
+                    if x < area.right() - 1 {
+                        if let Some(cell) = surface.get_mut(x, area.y) {
+                            cell.set_symbol(&ch.to_string()).set_style(accent);
+                        }
+                    }
+                }
+            }
+
+            inner
+        } else {
+            let block = Block::bordered()
+                .title(toast.title.as_str())
+                .border_style(accent);
+            let inner = block.inner(area);
+            block.render(area, surface);
+            inner
+        };
 
         let text_x = inner.x + PAD;
         let text_width = inner.width.saturating_sub(2 * PAD) as usize;
@@ -310,6 +354,18 @@ fn accent_style(theme: &Theme, severity: Severity) -> Style {
     theme
         .try_get_exact(scope)
         .unwrap_or_else(|| theme.get(fallback))
+}
+
+fn gradient_for_severity(
+    colors: &helix_view::editor::GradientNotificationColors,
+    severity: Severity,
+) -> (String, String) {
+    match severity {
+        Severity::Error => (colors.error_start.clone(), colors.error_end.clone()),
+        Severity::Warning => (colors.warning_start.clone(), colors.warning_end.clone()),
+        Severity::Info => (colors.info_start.clone(), colors.info_end.clone()),
+        Severity::Hint => (colors.hint_start.clone(), colors.hint_end.clone()),
+    }
 }
 
 /// Word-aware wrap to `width` display columns, breaking words longer than the

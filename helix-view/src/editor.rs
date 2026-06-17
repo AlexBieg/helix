@@ -414,6 +414,9 @@ pub struct Config {
     pub popup_border: PopupBorderConfig,
     /// Draw rounded border corners
     pub rounded_corners: bool,
+    /// Gradient border configuration for pickers.
+    #[serde(default)]
+    pub gradient_borders: GradientBorderConfig,
     /// Which indent heuristic to use when a new line is inserted
     #[serde(default)]
     pub indent_heuristic: IndentationHeuristic,
@@ -490,6 +493,40 @@ pub struct NotificationConfig {
     /// Auto-dismiss timeouts in milliseconds, per severity. `0` means sticky
     /// (dismissed only by the user).
     pub timeout: NotificationTimeouts,
+    /// Whether to use gradient borders on notifications. Defaults to `false`.
+    #[serde(default)]
+    pub gradient: bool,
+    /// Gradient colors per severity for notification borders.
+    #[serde(default)]
+    pub gradient_colors: GradientNotificationColors,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
+pub struct GradientNotificationColors {
+    pub error_start: String,
+    pub error_end: String,
+    pub warning_start: String,
+    pub warning_end: String,
+    pub info_start: String,
+    pub info_end: String,
+    pub hint_start: String,
+    pub hint_end: String,
+}
+
+impl Default for GradientNotificationColors {
+    fn default() -> Self {
+        Self {
+            error_start: "#FF0000".to_string(),
+            error_end: "#8B0000".to_string(),
+            warning_start: "#FFAA00".to_string(),
+            warning_end: "#8B6914".to_string(),
+            info_start: "#4488FF".to_string(),
+            info_end: "#88BBFF".to_string(),
+            hint_start: "#AAAAAA".to_string(),
+            hint_end: "#444444".to_string(),
+        }
+    }
 }
 
 impl Default for NotificationConfig {
@@ -499,6 +536,8 @@ impl Default for NotificationConfig {
             max_visible: 5,
             animate: true,
             timeout: NotificationTimeouts::default(),
+            gradient: false,
+            gradient_colors: GradientNotificationColors::default(),
         }
     }
 }
@@ -1253,6 +1292,42 @@ pub enum PopupBorderConfig {
     Menu,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum GradientDirection {
+    #[default]
+    Horizontal,
+    Vertical,
+    Diagonal,
+    Radial,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
+pub struct GradientBorderConfig {
+    pub enable: bool,
+    pub thickness: u8,
+    pub direction: GradientDirection,
+    pub start_color: String,
+    pub end_color: String,
+    pub middle_color: String,
+    pub animation_speed: u8,
+}
+
+impl Default for GradientBorderConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            thickness: 1,
+            direction: GradientDirection::Horizontal,
+            start_color: "#8A2BE2".to_string(),
+            end_color: "#00BFFF".to_string(),
+            middle_color: "".to_string(),
+            animation_speed: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct WordCompletion {
@@ -1328,6 +1403,7 @@ impl Default for Config {
             smart_tab: Some(SmartTabConfig::default()),
             popup_border: PopupBorderConfig::None,
             rounded_corners: true,
+            gradient_borders: GradientBorderConfig::default(),
             indent_heuristic: IndentationHeuristic::default(),
             jump_label_alphabet: ('a'..='z').collect(),
             inline_diagnostics: InlineDiagnosticsConfig::default(),
