@@ -53,6 +53,11 @@ pub struct EditorView {
     /// Per-buffer x-coordinate ranges in the bufferline, populated during render.
     /// Used for mouse click switching.
     bufferline_ranges: Vec<(helix_view::DocumentId, u16, u16)>,
+    /// Index (in `DocumentId` order) of the leftmost buffer drawn in the
+    /// bufferline. Adjusted minimally each frame to keep the active buffer and a
+    /// small neighbor margin visible. Shared across splits (the bufferline is a
+    /// single global element keyed to the currently active buffer).
+    bufferline_first_visible: usize,
     /// Active particle animation that plays around the cursor on mode switch.
     mode_switch_animation: Option<ModeSwitchAnimation>,
     /// The editor mode during the last render, used to detect mode switches.
@@ -90,6 +95,7 @@ impl EditorView {
             terminal_focused: true,
             prompt_active: false,
             bufferline_ranges: Vec::new(),
+            bufferline_first_visible: 0,
             mode_switch_animation: None,
             last_rendered_mode: Mode::Normal,
             pending_scroll: 0,
@@ -754,9 +760,14 @@ impl EditorView {
         viewport: Rect,
         surface: &mut Surface,
         ranges: &mut Vec<(helix_view::DocumentId, u16, u16)>,
+        first_visible: &mut usize,
     ) {
+        /// Neighbor buffers kept visible on each side of the active buffer.
+        const MARGIN: usize = 1;
+        /// Columns reserved per side for an overflow indicator (`‹` + 3 digits).
+        const RESERVE: u16 = 4;
+
         ranges.clear();
-        let scratch = PathBuf::from(SCRATCH_BUFFER_NAME); // default filename to use for scratch buffer
         surface.clear_with(
             viewport,
             editor
@@ -775,36 +786,71 @@ impl EditorView {
             .try_get("ui.bufferline")
             .unwrap_or_else(|| editor.theme.get("ui.statusline.inactive"));
 
-        let mut x = viewport.x;
+        let docs: Vec<&Document> = editor.documents().collect();
+        if docs.is_empty() {
+            *first_visible = 0;
+            return;
+        }
+
+        let paths: Vec<Option<PathBuf>> =
+            docs.iter().map(|doc| doc.path().map(Into::into)).collect();
+        let names = disambiguate(&paths);
+
+        let labels: Vec<String> = docs
+            .iter()
+            .zip(&names)
+            .map(|(doc, name)| {
+                format!(" {}{} ", name, if doc.is_modified() { "[+]" } else { "" })
+            })
+            .collect();
+        let widths: Vec<u16> = labels.iter().map(|l| l.width() as u16).collect();
+
         let current_doc = view!(editor).doc;
+        let active_idx = docs
+            .iter()
+            .position(|doc| doc.id() == current_doc)
+            .unwrap_or(0);
 
-        for doc in editor.documents() {
-            let fname = doc
-                .path()
-                .unwrap_or(&scratch)
-                .file_name()
-                .unwrap_or_default()
-                .to_str()
-                .unwrap_or_default();
+        let total: u32 = widths.iter().map(|w| *w as u32).sum();
+        // Fast path: everything fits, so no scrolling and no indicators — which
+        // also means an overflow arrow can never appear when nothing is hidden.
+        let (start_idx, content_start, content_end, show_indicators) =
+            if total <= viewport.width as u32 {
+                *first_visible = 0;
+                (0, viewport.x, viewport.right(), false)
+            } else {
+                let avail = viewport.width.saturating_sub(2 * RESERVE);
+                let fv = resolve_first_visible(&widths, active_idx, *first_visible, avail, MARGIN);
+                *first_visible = fv;
+                (
+                    fv,
+                    viewport.x + RESERVE,
+                    viewport.right().saturating_sub(RESERVE),
+                    true,
+                )
+            };
 
-            let is_active = current_doc == doc.id();
+        let mut x = content_start;
+        let mut last_rendered = start_idx;
+        for i in start_idx..docs.len() {
+            if x >= content_end {
+                break;
+            }
+            let is_active = i == active_idx;
             let style = if is_active {
                 bufferline_active
             } else {
                 bufferline_inactive
             };
-
-            let text = format!(" {}{} ", fname, if doc.is_modified() { "[+]" } else { "" });
-            let used_width = viewport.x.saturating_sub(x);
-            let rem_width = surface.area.width.saturating_sub(used_width);
-
+            let text = &labels[i];
+            let rem_width = content_end.saturating_sub(x);
             let start_x = x;
 
             if is_active && editor.config().gradient_borders.enable {
                 let text_width = text.chars().count().min(rem_width as usize);
-                for (i, ch) in text.chars().take(text_width).enumerate() {
+                for (j, ch) in text.chars().take(text_width).enumerate() {
                     let ratio = if text_width > 1 {
-                        i as f32 / (text_width - 1) as f32
+                        j as f32 / (text_width - 1) as f32
                     } else {
                         0.0
                     };
@@ -813,20 +859,42 @@ impl EditorView {
                         ratio,
                     );
                     let cell_style = style.bg(color);
-                    if let Some(cell) = surface.get_mut(x + i as u16, viewport.y) {
+                    if let Some(cell) = surface.get_mut(x + j as u16, viewport.y) {
                         cell.set_symbol(&ch.to_string()).set_style(cell_style);
                     }
                 }
-                x = (x + text_width as u16).min(surface.area.right());
+                x = (x + text_width as u16).min(content_end);
             } else {
                 x = surface
-                    .set_stringn(x, viewport.y, &text, rem_width as usize, style)
+                    .set_stringn(x, viewport.y, text, rem_width as usize, style)
                     .0;
             }
-            ranges.push((doc.id(), start_x, x));
+            ranges.push((docs[i].id(), start_x, x));
+            last_rendered = i;
+        }
 
-            if x >= surface.area.right() {
-                break;
+        if show_indicators {
+            let hidden_left = start_idx;
+            let hidden_right = docs.len() - last_rendered - 1;
+            if hidden_left > 0 {
+                surface.set_stringn(
+                    viewport.x,
+                    viewport.y,
+                    &format!("‹{hidden_left}"),
+                    RESERVE as usize,
+                    bufferline_inactive,
+                );
+            }
+            if hidden_right > 0 {
+                let label = format!("{hidden_right}›");
+                let w = (label.width() as u16).min(RESERVE);
+                surface.set_stringn(
+                    viewport.right().saturating_sub(w),
+                    viewport.y,
+                    &label,
+                    RESERVE as usize,
+                    bufferline_inactive,
+                );
             }
         }
     }
@@ -1792,6 +1860,7 @@ impl Component for EditorView {
                 area.with_height(1),
                 surface,
                 &mut self.bufferline_ranges,
+                &mut self.bufferline_first_visible,
             );
         }
 
@@ -1916,5 +1985,253 @@ fn canonicalize_key(key: &mut KeyEvent) {
     } = key
     {
         key.modifiers.remove(KeyModifiers::SHIFT)
+    }
+}
+
+/// Produce a display name for each open buffer, extending duplicate filenames
+/// with the minimal number of trailing path components needed to make every
+/// label unique across all open buffers (see bufferline spec, Phase 2 / R5-R6).
+/// `None` paths are scratch buffers; multiple scratch buffers are disambiguated
+/// with a 1-based ordinal suffix. Names exclude the surrounding spaces and the
+/// `[+]` modified marker, which the caller adds.
+fn disambiguate(paths: &[Option<PathBuf>]) -> Vec<String> {
+    use std::path::{Component, MAIN_SEPARATOR_STR};
+
+    let n = paths.len();
+
+    // Split each path into its `Normal` components (file name last). `None`
+    // entries are scratch buffers, represented by an empty component list.
+    let parts: Vec<Vec<String>> = paths
+        .iter()
+        .map(|path| {
+            path.as_ref()
+                .map(|path| {
+                    path.components()
+                        .filter_map(|c| match c {
+                            Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .collect();
+
+    let label_with = |i: usize, k: usize| -> String {
+        let comps = &parts[i];
+        if comps.is_empty() {
+            return SCRATCH_BUFFER_NAME.to_string();
+        }
+        let k = k.clamp(1, comps.len());
+        comps[comps.len() - k..].join(MAIN_SEPARATOR_STR)
+    };
+
+    // Grow each label one trailing component at a time until every label is
+    // globally unique, or the colliding labels have reached their full path.
+    let mut k = vec![1usize; n];
+    let mut labels: Vec<String> = (0..n).map(|i| label_with(i, k[i])).collect();
+    loop {
+        let colliding: Vec<bool> = (0..n)
+            .map(|i| (0..n).any(|j| j != i && labels[j] == labels[i]))
+            .collect();
+        if !colliding.iter().any(|&c| c) {
+            break;
+        }
+        let mut progressed = false;
+        for i in 0..n {
+            if colliding[i] && k[i] < parts[i].len() {
+                k[i] += 1;
+                progressed = true;
+            }
+        }
+        if !progressed {
+            break;
+        }
+        labels = (0..n).map(|i| label_with(i, k[i])).collect();
+    }
+
+    // Scratch buffers share a path-less name; number them so they stay distinct.
+    if paths.iter().filter(|p| p.is_none()).count() > 1 {
+        let mut ordinal = 0;
+        for i in 0..n {
+            if paths[i].is_none() {
+                ordinal += 1;
+                labels[i] = format!("{SCRATCH_BUFFER_NAME} ({ordinal})");
+            }
+        }
+    }
+
+    labels
+}
+
+/// Choose the index of the leftmost buffer to draw so the active buffer (plus a
+/// `margin` of neighbors on each side, when space allows) stays visible, moving
+/// the offset as little as possible from `prev` (see bufferline spec, Phase 3 /
+/// R1-R3). `avail` is the usable width in columns after reserving overflow
+/// indicators.
+fn resolve_first_visible(
+    widths: &[u16],
+    active: usize,
+    prev: usize,
+    avail: u16,
+    margin: usize,
+) -> usize {
+    let n = widths.len();
+    if n == 0 {
+        return 0;
+    }
+    let active = active.min(n - 1);
+
+    // Largest index >= fv whose tab still fits within `avail`, but never less
+    // than fv itself — a single oversized tab is shown anyway (R1, degenerate).
+    let last_fit = |fv: usize| -> usize {
+        let mut sum = 0u32;
+        let mut last = fv;
+        for j in fv..n {
+            sum += widths[j] as u32;
+            if j == fv || sum <= avail as u32 {
+                last = j;
+            } else {
+                break;
+            }
+        }
+        last
+    };
+
+    let mut fv = prev.min(n - 1);
+
+    // Scroll left so the active buffer keeps its left margin. Only decreases fv.
+    let left_limit = active - margin.min(active);
+    if fv > left_limit {
+        fv = left_limit;
+    }
+
+    // Scroll right until the active buffer plus its right margin are visible.
+    // Bounded by `active`, so it can never push the active buffer off-screen.
+    let right_target = (active + margin).min(n - 1);
+    while last_fit(fv) < right_target && fv < active {
+        fv += 1;
+    }
+
+    fv
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{PathBuf, MAIN_SEPARATOR_STR as SEP};
+
+    fn p(s: &str) -> Option<PathBuf> {
+        Some(PathBuf::from(s))
+    }
+
+    #[test]
+    fn disambiguate_unique_names_stay_bare() {
+        let got = disambiguate(&[p("src/main.rs"), p("src/lib.rs")]);
+        assert_eq!(got, vec!["main.rs".to_string(), "lib.rs".to_string()]);
+    }
+
+    #[test]
+    fn disambiguate_collision_adds_one_parent() {
+        let got = disambiguate(&[p("routes/mod.rs"), p("models/mod.rs")]);
+        assert_eq!(
+            got,
+            vec![format!("routes{SEP}mod.rs"), format!("models{SEP}mod.rs")]
+        );
+    }
+
+    #[test]
+    fn disambiguate_grows_k_until_distinct() {
+        // share trailing "b/x.rs"; must grow to 3 components to differ.
+        let got = disambiguate(&[p("a/b/x.rs"), p("c/b/x.rs")]);
+        assert_eq!(
+            got,
+            vec![
+                format!("a{SEP}b{SEP}x.rs"),
+                format!("c{SEP}b{SEP}x.rs")
+            ]
+        );
+    }
+
+    #[test]
+    fn disambiguate_global_uniqueness_across_groups() {
+        // a/x.rs and b/x.rs collide on x.rs; a/y.rs is unique and must stay bare
+        // rather than collapse toward "a/..." and collide with a/x.rs.
+        let got = disambiguate(&[p("a/x.rs"), p("b/x.rs"), p("a/y.rs")]);
+        assert_eq!(
+            got,
+            vec![
+                format!("a{SEP}x.rs"),
+                format!("b{SEP}x.rs"),
+                "y.rs".to_string(),
+            ]
+        );
+        let mut uniq = got.clone();
+        uniq.sort();
+        uniq.dedup();
+        assert_eq!(uniq.len(), 3, "labels must be globally unique");
+    }
+
+    #[test]
+    fn disambiguate_scratch_buffers_get_ordinals() {
+        let got = disambiguate(&[None, p("src/main.rs"), None]);
+        assert_eq!(
+            got,
+            vec![
+                format!("{SCRATCH_BUFFER_NAME} (1)"),
+                "main.rs".to_string(),
+                format!("{SCRATCH_BUFFER_NAME} (2)"),
+            ]
+        );
+    }
+
+    #[test]
+    fn disambiguate_single_scratch_stays_bare() {
+        let got = disambiguate(&[None, p("src/main.rs")]);
+        assert_eq!(
+            got,
+            vec![SCRATCH_BUFFER_NAME.to_string(), "main.rs".to_string()]
+        );
+    }
+
+    #[test]
+    fn scroll_stable_when_active_within_margins() {
+        let widths = vec![10u16; 20]; // avail fits 5 tabs
+        assert_eq!(resolve_first_visible(&widths, 10, 8, 50, 1), 8);
+    }
+
+    #[test]
+    fn scroll_right_minimum_when_active_past_right_margin() {
+        let widths = vec![10u16; 20];
+        // prev shows 8..=12; active jumps to 13, needs 13 + right margin 14 visible.
+        assert_eq!(resolve_first_visible(&widths, 13, 8, 50, 1), 10);
+    }
+
+    #[test]
+    fn scroll_left_when_active_before_left_margin() {
+        let widths = vec![10u16; 20];
+        assert_eq!(resolve_first_visible(&widths, 2, 10, 50, 1), 1);
+    }
+
+    #[test]
+    fn scroll_active_at_start_scrolls_to_zero() {
+        let widths = vec![10u16; 20];
+        assert_eq!(resolve_first_visible(&widths, 0, 5, 50, 1), 0);
+    }
+
+    #[test]
+    fn scroll_oversized_label_still_shows_active() {
+        let widths = vec![100u16; 5]; // each wider than avail
+        assert_eq!(resolve_first_visible(&widths, 3, 0, 50, 1), 3);
+    }
+
+    #[test]
+    fn scroll_single_buffer() {
+        assert_eq!(resolve_first_visible(&[10], 0, 0, 50, 1), 0);
+    }
+
+    #[test]
+    fn scroll_empty() {
+        assert_eq!(resolve_first_visible(&[], 0, 0, 50, 1), 0);
     }
 }

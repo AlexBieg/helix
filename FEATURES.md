@@ -2,6 +2,18 @@
 
 Custom features added on top of upstream Helix.
 
+## 2026-06-18
+
+### Bufferline that follows the active buffer
+- The bufferline now scrolls horizontally to keep the active buffer visible instead of hard-truncating at the right edge, so the selected buffer (and its neighbors) stay on screen no matter how many buffers are open
+- Keeps a one-buffer margin on each side of the active buffer, so the next/previous buffer is always visible — and since `goto_next/previous_buffer` walk the same `DocumentId` order, you can always see what `Space n`/`Space p` will land on
+- Scrolling is stable (vim `scrolloff`-style): the offset only moves when the active buffer would otherwise leave its margin, so switching among already-visible buffers doesn't shift the strip
+- Overflow indicators show the count of hidden buffers on each side (`‹12`, `5›`), drawn in `ui.bufferline`; they only appear when buffers are actually hidden
+- Duplicate filenames are disambiguated with the minimal trailing path needed to make every label unique across open buffers (`routes/mod.rs` vs `models/mod.rs`); unique names stay bare. Multiple scratch buffers get numbered (`[scratch] (1)`)
+- The bufferline is a single global element; its scroll offset is shared across splits and keyed to the currently active buffer
+- Preserves existing click-to-switch and active-buffer gradient rendering
+- Core logic lives in the pure, unit-tested `disambiguate` and `resolve_first_visible` helpers in `helix-term/src/ui/editor.rs`
+
 ## 2026-06-16
 
 ### Gradient borders for pickers, notifications, and info popups
