@@ -156,8 +156,29 @@ pub fn workspace_lang_config_file() -> PathBuf {
     find_workspace().0.join(".helix").join("languages.toml")
 }
 
+/// Path to the session file for the current workspace.
+///
+/// Sessions are stored globally under `data_dir()/sessions` rather than inside
+/// the workspace, so they work in repos where `.gitignore` can't be touched.
+/// Each workspace maps to `<sha1(canonical workspace path)>.toml`; canonicalizing
+/// first means the same project always resolves to the same file regardless of
+/// symlinks or the directory you launched from.
 pub fn workspace_session_file() -> PathBuf {
-    find_workspace().0.join(".helix").join("session.toml")
+    let workspace = helix_stdx::path::canonicalize(find_workspace().0);
+    let key = sha1_hex(workspace.as_os_str().as_encoded_bytes());
+    data_dir().join("sessions").join(format!("{key}.toml"))
+}
+
+fn sha1_hex(bytes: &[u8]) -> String {
+    use sha1::{Digest, Sha1};
+    use std::fmt::Write;
+
+    let digest = Sha1::digest(bytes);
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 pub fn lang_config_file() -> PathBuf {
@@ -295,6 +316,29 @@ fn ensure_parent_dir(path: &Path) {
         if !parent.exists() {
             std::fs::create_dir_all(parent).ok();
         }
+    }
+}
+
+#[cfg(test)]
+mod session_path_tests {
+    use super::{sha1_hex, workspace_session_file};
+
+    #[test]
+    fn sha1_hex_matches_known_vector() {
+        assert_eq!(
+            sha1_hex(b"abc"),
+            "a9993e364706816aba3e25717850c26c9cd0d89d"
+        );
+    }
+
+    #[test]
+    fn session_file_is_global_and_hash_named() {
+        let path = workspace_session_file();
+        assert_eq!(path.parent().unwrap().file_name().unwrap(), "sessions");
+        assert_eq!(path.extension().unwrap(), "toml");
+        let stem = path.file_stem().unwrap().to_str().unwrap();
+        assert_eq!(stem.len(), 40, "sha1 hex digest is 40 chars");
+        assert!(stem.bytes().all(|b| b.is_ascii_hexdigit()));
     }
 }
 

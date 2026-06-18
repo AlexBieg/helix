@@ -5,6 +5,10 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Session {
+    /// Absolute path of the workspace this session belongs to. Recorded so the
+    /// globally-stored, hash-named session files are self-describing.
+    #[serde(default)]
+    pub workspace_root: PathBuf,
     /// The currently focused document index (into the documents vec).
     pub active_document_index: usize,
     /// Open documents in order (first is the most recently active).

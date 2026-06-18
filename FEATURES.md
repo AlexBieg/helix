@@ -224,7 +224,7 @@ Custom features added on top of upstream Helix.
 
 ### Session persistence
 - Automatically saves and restores open files, split layout, cursor positions, selections, and scroll state per workspace
-- Session data is stored as TOML at `<workspace_root>/.helix/session.toml` (one session per project/workspace)
+- Session data is stored globally as TOML under `data_dir()/sessions/<hash>.toml` (XDG: `~/.local/share/helix/sessions/`, honoring `$XDG_DATA_HOME`), one file per workspace. The filename is the SHA-1 of the canonicalized workspace path, so the same project always resolves to the same session regardless of symlinks or launch directory — and sessions work in repos where `.gitignore` can't be modified, since nothing is written inside the repo. Each file records its `workspace-root` so the hash-named files are self-describing (updated 2026-06-18; previously stored in-repo at `<workspace_root>/.helix/session.toml`)
 - Auto-saves on editor exit (`:q`, `:qa`) and restores on startup when launching with no arguments
 - Includes the recent files MRU list so the recent file picker survives restarts
 - Manual save via `:save-session`

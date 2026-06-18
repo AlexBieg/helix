@@ -3123,6 +3123,7 @@ impl Editor {
         let splits = self.build_session_tree(self.tree.root(), &doc_order);
 
         let session = crate::session::Session {
+            workspace_root: helix_loader::find_workspace().0,
             active_document_index,
             documents: session_docs,
             splits,

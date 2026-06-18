@@ -1458,6 +1458,7 @@ dependencies = [
  "log",
  "once_cell",
  "serde",
+ "sha1",
  "tempfile",
  "threadpool",
  "toml",
