@@ -337,8 +337,9 @@ impl EditorView {
             .area
             .clip_top(view.area.height.saturating_sub(statusline_height));
 
+        let pending_keys = self.keymaps.pending();
         let mut context =
-            statusline::RenderContext::new(editor, doc, view, is_focused, &self.spinners);
+            statusline::RenderContext::new(editor, doc, view, is_focused, &self.spinners, pending_keys);
 
         statusline::render(&mut context, statusline_area, surface);
     }
@@ -1845,8 +1846,14 @@ impl Component for EditorView {
             _ => false,
         };
 
+        let use_full_height = config.cmdline.use_full_height;
+
         // -1 for commandline and -1 for bufferline
-        let mut editor_area = area.clip_bottom(1);
+        let mut editor_area = if use_full_height {
+            area
+        } else {
+            area.clip_bottom(1)
+        };
         if use_bufferline {
             editor_area = editor_area.clip_top(1);
         }
@@ -1876,62 +1883,64 @@ impl Component for EditorView {
             }
         }
 
-        let key_width = 15u16; // for showing pending keys
-        let mut status_msg_width = 0;
+        if !use_full_height {
+            let key_width = 15u16; // for showing pending keys
+            let mut status_msg_width = 0;
 
-        // render status msg
-        if let Some((status_msg, severity)) = &cx.editor.status_msg {
-            status_msg_width = status_msg.width();
-            use helix_view::editor::Severity;
-            let style = if *severity == Severity::Error {
-                cx.editor.theme.get("error")
-            } else {
-                cx.editor.theme.get("ui.text")
-            };
+            // render status msg
+            if let Some((status_msg, severity)) = &cx.editor.status_msg {
+                status_msg_width = status_msg.width();
+                use helix_view::editor::Severity;
+                let style = if *severity == Severity::Error {
+                    cx.editor.theme.get("error")
+                } else {
+                    cx.editor.theme.get("ui.text")
+                };
 
-            surface.set_string(
-                area.x,
-                area.y + area.height.saturating_sub(1),
-                status_msg,
-                style,
-            );
-        }
-
-        if area.width.saturating_sub(status_msg_width as u16) > key_width {
-            let mut disp = String::new();
-            if let Some(count) = cx.editor.count {
-                disp.push_str(&count.to_string())
-            }
-            for key in self.keymaps.pending() {
-                disp.push_str(&key.key_sequence_format());
-            }
-            for key in &self.pseudo_pending {
-                disp.push_str(&key.key_sequence_format());
-            }
-            let style = cx.editor.theme.get("ui.text");
-            let macro_width = if cx.editor.macro_recording.is_some() {
-                3
-            } else {
-                0
-            };
-            surface.set_string(
-                area.x + area.width.saturating_sub(key_width + macro_width),
-                area.y + area.height.saturating_sub(1),
-                disp.get(disp.len().saturating_sub(key_width as usize)..)
-                    .unwrap_or(&disp),
-                style,
-            );
-            if let Some((reg, _)) = cx.editor.macro_recording {
-                let disp = format!("[{}]", reg);
-                let style = style
-                    .fg(helix_view::graphics::Color::Yellow)
-                    .add_modifier(Modifier::BOLD);
                 surface.set_string(
-                    area.x + area.width.saturating_sub(3),
+                    area.x,
                     area.y + area.height.saturating_sub(1),
-                    &disp,
+                    status_msg,
                     style,
                 );
+            }
+
+            if area.width.saturating_sub(status_msg_width as u16) > key_width {
+                let mut disp = String::new();
+                if let Some(count) = cx.editor.count {
+                    disp.push_str(&count.to_string())
+                }
+                for key in self.keymaps.pending() {
+                    disp.push_str(&key.key_sequence_format());
+                }
+                for key in &self.pseudo_pending {
+                    disp.push_str(&key.key_sequence_format());
+                }
+                let style = cx.editor.theme.get("ui.text");
+                let macro_width = if cx.editor.macro_recording.is_some() {
+                    3
+                } else {
+                    0
+                };
+                surface.set_string(
+                    area.x + area.width.saturating_sub(key_width + macro_width),
+                    area.y + area.height.saturating_sub(1),
+                    disp.get(disp.len().saturating_sub(key_width as usize)..)
+                        .unwrap_or(&disp),
+                    style,
+                );
+                if let Some((reg, _)) = cx.editor.macro_recording {
+                    let disp = format!("[{}]", reg);
+                    let style = style
+                        .fg(helix_view::graphics::Color::Yellow)
+                        .add_modifier(Modifier::BOLD);
+                    surface.set_string(
+                        area.x + area.width.saturating_sub(3),
+                        area.y + area.height.saturating_sub(1),
+                        &disp,
+                        style,
+                    );
+                }
             }
         }
 

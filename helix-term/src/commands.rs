@@ -66,7 +66,7 @@ use crate::{
     compositor::{self, Component, Compositor},
     filter_picker_entry,
     job::Callback,
-    ui::{self, overlay::overlaid, Picker, PickerColumn, Popup, Prompt, PromptEvent},
+    ui::{self, overlay::overlaid, Picker, PickerColumn, Popup, PromptEvent},
 };
 
 use crate::job::{self, Jobs};

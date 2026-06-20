@@ -438,6 +438,9 @@ pub struct Config {
     pub rainbow_brackets: bool,
     /// Whether to enable Kitty Keyboard Protocol
     pub kitty_keyboard_protocol: KittyKeyboardProtocolConfig,
+    /// Command line configuration.
+    #[serde(default)]
+    pub cmdline: CmdlineConfig,
     pub buffer_picker: BufferPickerConfig,
     /// Whether to implicitly trust every workspace or not
     pub insecure: bool,
@@ -912,6 +915,12 @@ pub enum StatusLineElement {
     /// The current search match position and total, e.g. `[3/12]`. Only shown
     /// while a search is active; updates as you navigate with `n`/`N`.
     SearchCount,
+
+    /// Indicator for macro recording (e.g. `rec @r`)
+    MacroRecording,
+
+    /// Currently pending keystrokes for key sequence disambiguation
+    PendingKeys,
 }
 
 // Cursor shape is read and used on every rendered frame and so needs
@@ -1328,6 +1337,48 @@ impl Default for GradientBorderConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
+pub struct CmdlineIcons {
+    pub search: String,
+    pub command: String,
+    pub shell: String,
+    pub general: String,
+}
+
+impl Default for CmdlineIcons {
+    fn default() -> Self {
+        Self {
+            search: "🔍".to_string(),
+            command: "⚙".to_string(),
+            shell: "⚡".to_string(),
+            general: "💬".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
+pub struct CmdlineConfig {
+    pub show_icons: bool,
+    pub min_popup_width: u16,
+    pub max_popup_width: u16,
+    pub use_full_height: bool,
+    pub icons: CmdlineIcons,
+}
+
+impl Default for CmdlineConfig {
+    fn default() -> Self {
+        Self {
+            show_icons: true,
+            min_popup_width: 40,
+            max_popup_width: 80,
+            use_full_height: false,
+            icons: CmdlineIcons::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct WordCompletion {
@@ -1412,6 +1463,7 @@ impl Default for Config {
             editor_config: true,
             rainbow_brackets: false,
             kitty_keyboard_protocol: Default::default(),
+            cmdline: CmdlineConfig::default(),
             buffer_picker: BufferPickerConfig::default(),
             insecure: false,
             session: SessionConfig::default(),

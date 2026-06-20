@@ -1,4 +1,5 @@
 pub mod animation;
+mod cmdline_popup;
 mod completion;
 mod document;
 pub(crate) mod editor;
@@ -22,6 +23,7 @@ mod text_decorations;
 use crate::compositor::Compositor;
 use crate::filter_picker_entry;
 use crate::job::{self, Callback};
+pub use cmdline_popup::CmdlinePopup;
 pub use completion::Completion;
 pub use editor::EditorView;
 use helix_stdx::rope;
@@ -60,10 +62,15 @@ pub fn prompt(
     completion_fn: impl FnMut(&Editor, &str) -> Vec<prompt::Completion> + 'static,
     callback_fn: impl FnMut(&mut crate::compositor::Context, &str, PromptEvent) + 'static,
 ) {
-    let mut prompt = Prompt::new(prompt, history_register, completion_fn, callback_fn);
-    // Calculate the initial completion
-    prompt.recalculate_completion(cx.editor);
-    cx.push_layer(Box::new(prompt));
+    let cmdline_config = cx.editor.config().cmdline.clone();
+    let cmdline = CmdlinePopup::new(
+        prompt,
+        history_register,
+        completion_fn,
+        callback_fn,
+        &cmdline_config,
+    );
+    cx.push_layer(Box::new(cmdline));
 }
 
 pub fn prompt_with_input(
@@ -74,9 +81,16 @@ pub fn prompt_with_input(
     completion_fn: impl FnMut(&Editor, &str) -> Vec<prompt::Completion> + 'static,
     callback_fn: impl FnMut(&mut crate::compositor::Context, &str, PromptEvent) + 'static,
 ) {
-    let prompt = Prompt::new(prompt, history_register, completion_fn, callback_fn)
-        .with_line(input, cx.editor);
-    cx.push_layer(Box::new(prompt));
+    let cmdline_config = cx.editor.config().cmdline.clone();
+    let cmdline = CmdlinePopup::new(
+        prompt,
+        history_register,
+        completion_fn,
+        callback_fn,
+        &cmdline_config,
+    )
+    .with_line(input, cx.editor);
+    cx.push_layer(Box::new(cmdline));
 }
 
 pub fn regex_prompt(
@@ -107,95 +121,93 @@ pub fn raw_regex_prompt(
     let snapshot = doc.selection(view.id).clone();
     let offset_snapshot = doc.view_offset(view.id);
     let config = cx.editor.config();
+    let cmdline_config = config.cmdline.clone();
 
-    let mut prompt = Prompt::new(
-        prompt,
-        history_register,
-        completion_fn,
-        move |cx: &mut crate::compositor::Context, input: &str, event: PromptEvent| {
-            match event {
-                PromptEvent::Abort => {
-                    let doc = doc_mut!(cx.editor, &doc_id);
-                    let view = view_mut!(cx.editor, view_id);
-                    doc.set_selection(view.id, snapshot.clone());
-                    doc.set_view_offset(view.id, offset_snapshot);
+    let callback = move |cx: &mut crate::compositor::Context, input: &str, event: PromptEvent| {
+        match event {
+            PromptEvent::Abort => {
+                let doc = doc_mut!(cx.editor, &doc_id);
+                let view = view_mut!(cx.editor, view_id);
+                doc.set_selection(view.id, snapshot.clone());
+                doc.set_view_offset(view.id, offset_snapshot);
+            }
+            PromptEvent::Update | PromptEvent::Validate => {
+                if input.is_empty() {
+                    return;
                 }
-                PromptEvent::Update | PromptEvent::Validate => {
-                    // skip empty input
-                    if input.is_empty() {
-                        return;
-                    }
 
-                    let case_insensitive = if config.search.smart_case {
-                        !input.chars().any(char::is_uppercase)
-                    } else {
-                        false
-                    };
+                let case_insensitive = if config.search.smart_case {
+                    !input.chars().any(char::is_uppercase)
+                } else {
+                    false
+                };
 
-                    let is_crlf = doc!(cx.editor).line_ending == helix_core::LineEnding::Crlf;
-                    match rope::RegexBuilder::new()
-                        .syntax(
-                            rope::Config::new()
-                                .case_insensitive(case_insensitive)
-                                .multi_line(true)
-                                .crlf(is_crlf),
-                        )
-                        .build(input)
-                    {
-                        Ok(regex) => {
-                            let doc = doc_mut!(cx.editor, &doc_id);
-                            let view = view_mut!(cx.editor, view_id);
+                let is_crlf = doc!(cx.editor).line_ending == helix_core::LineEnding::Crlf;
+                match rope::RegexBuilder::new()
+                    .syntax(
+                        rope::Config::new()
+                            .case_insensitive(case_insensitive)
+                            .multi_line(true)
+                            .crlf(is_crlf),
+                    )
+                    .build(input)
+                {
+                    Ok(regex) => {
+                        let doc = doc_mut!(cx.editor, &doc_id);
+                        let view = view_mut!(cx.editor, view_id);
 
-                            // revert state to what it was before the last update
-                            doc.set_selection(view.id, snapshot.clone());
+                        doc.set_selection(view.id, snapshot.clone());
 
-                            if event == PromptEvent::Validate {
-                                // Equivalent to push_jump to store selection just before jump
-                                view.push_jump(doc, (doc_id, snapshot.clone()));
-                            }
-
-                            fun(cx, regex, input, event);
-
-                            let (view, doc) = current!(cx.editor);
-                            view.ensure_cursor_in_view(doc, config.scrolloff);
+                        if event == PromptEvent::Validate {
+                            view.push_jump(doc, (doc_id, snapshot.clone()));
                         }
-                        Err(err) => {
-                            let doc = doc_mut!(cx.editor, &doc_id);
-                            let view = view_mut!(cx.editor, view_id);
-                            doc.set_selection(view.id, snapshot.clone());
-                            doc.set_view_offset(view.id, offset_snapshot);
 
-                            if event == PromptEvent::Validate {
-                                let callback = async move {
-                                    let call: job::Callback = Callback::EditorCompositor(Box::new(
-                                        move |_editor: &mut Editor, compositor: &mut Compositor| {
-                                            let contents = Text::new(format!("{}", err));
-                                            let size = compositor.size();
-                                            let popup = Popup::new("invalid-regex", contents)
-                                                .position(Some(helix_core::Position::new(
-                                                    size.height as usize - 2, // 2 = statusline + commandline
-                                                    0,
-                                                )))
-                                                .auto_close(true);
-                                            compositor.replace_or_push("invalid-regex", popup);
-                                        },
-                                    ));
-                                    Ok(call)
-                                };
+                        fun(cx, regex, input, event);
 
-                                cx.jobs.callback(callback);
-                            }
+                        let (view, doc) = current!(cx.editor);
+                        view.ensure_cursor_in_view(doc, config.scrolloff);
+                    }
+                    Err(err) => {
+                        let doc = doc_mut!(cx.editor, &doc_id);
+                        let view = view_mut!(cx.editor, view_id);
+                        doc.set_selection(view.id, snapshot.clone());
+                        doc.set_view_offset(view.id, offset_snapshot);
+
+                        if event == PromptEvent::Validate {
+                            let callback = async move {
+                                let call: job::Callback = Callback::EditorCompositor(Box::new(
+                                    move |_editor: &mut Editor, compositor: &mut Compositor| {
+                                        let contents = Text::new(format!("{}", err));
+                                        let size = compositor.size();
+                                        let popup = Popup::new("invalid-regex", contents)
+                                            .position(Some(helix_core::Position::new(
+                                                size.height as usize - 2,
+                                                0,
+                                            )))
+                                            .auto_close(true);
+                                        compositor.replace_or_push("invalid-regex", popup);
+                                    },
+                                ));
+                                Ok(call)
+                            };
+
+                            cx.jobs.callback(callback);
                         }
                     }
                 }
             }
-        },
+        }
+    };
+
+    let cmdline = CmdlinePopup::new(
+        prompt,
+        history_register,
+        completion_fn,
+        callback,
+        &cmdline_config,
     )
     .with_language("regex", std::sync::Arc::clone(&cx.editor.syn_loader));
-    // Calculate initial completion
-    prompt.recalculate_completion(cx.editor);
-    // prompt
-    cx.push_layer(Box::new(prompt));
+    cx.push_layer(Box::new(cmdline));
 }
 
 /// We want to exclude files that the editor can't handle yet

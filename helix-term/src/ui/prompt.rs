@@ -406,6 +406,82 @@ impl Prompt {
     pub fn exit_selection(&mut self) {
         self.selection = None;
     }
+
+    pub fn completions(&self) -> &Vec<Completion> {
+        &self.completion
+    }
+
+    pub fn selection(&self) -> Option<usize> {
+        self.selection
+    }
+
+    pub fn prompt(&self) -> &str {
+        &self.prompt
+    }
+
+    pub fn anchor(&self) -> usize {
+        self.anchor
+    }
+
+    pub fn truncate_start(&self) -> bool {
+        self.truncate_start
+    }
+
+    pub fn truncate_end(&self) -> bool {
+        self.truncate_end
+    }
+
+    pub fn language(
+        &self,
+    ) -> &Option<(&'static str, std::sync::Arc<arc_swap::ArcSwap<helix_core::syntax::Loader>>)>
+    {
+        &self.language
+    }
+
+    pub fn update_scroll_anchor(&mut self, line_width: usize) {
+        use helix_core::unicode::segmentation::UnicodeSegmentation;
+        use helix_core::unicode::width::UnicodeWidthStr;
+
+        if self.line.width() < line_width {
+            self.anchor = 0;
+        } else if self.cursor <= self.anchor {
+            self.anchor = self.line[..self.cursor]
+                .grapheme_indices(true)
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or_default();
+        } else if self.line[self.anchor..self.cursor].width() > line_width {
+            let mut width = 0;
+            self.anchor = self.line[..self.cursor]
+                .grapheme_indices(true)
+                .rev()
+                .find_map(|(idx, g)| {
+                    width += g.width();
+                    if width > line_width {
+                        Some(idx + g.len())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
+        }
+
+        self.truncate_start = self.anchor > 0;
+        self.truncate_end = self.line[self.anchor..].width() > line_width;
+
+        if self.truncate_end && self.line[self.anchor..self.cursor].width() >= line_width {
+            self.anchor += self.line[self.anchor..]
+                .grapheme_indices(true)
+                .find_map(|(idx, g)| {
+                    if g.width() > 0 {
+                        Some(idx + g.len())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
+        }
+    }
 }
 
 const BASE_WIDTH: u16 = 30;

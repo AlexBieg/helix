@@ -12,6 +12,7 @@ use helix_view::{
 use crate::ui::ProgressSpinners;
 
 use helix_view::editor::StatusLineElement as StatusLineElementID;
+use helix_view::input::KeyEvent;
 use tui::buffer::Buffer as Surface;
 use tui::text::{Span, Spans};
 
@@ -21,6 +22,7 @@ pub struct RenderContext<'a> {
     pub view: &'a View,
     pub focused: bool,
     pub spinners: &'a ProgressSpinners,
+    pub pending_keys: &'a [KeyEvent],
     pub parts: RenderBuffer<'a>,
 }
 
@@ -31,6 +33,7 @@ impl<'a> RenderContext<'a> {
         view: &'a View,
         focused: bool,
         spinners: &'a ProgressSpinners,
+        pending_keys: &'a [KeyEvent],
     ) -> Self {
         RenderContext {
             editor,
@@ -38,6 +41,7 @@ impl<'a> RenderContext<'a> {
             view,
             focused,
             spinners,
+            pending_keys,
             parts: RenderBuffer::default(),
         }
     }
@@ -193,6 +197,8 @@ where
         helix_view::editor::StatusLineElement::Register => render_register,
         helix_view::editor::StatusLineElement::CurrentWorkingDirectory => render_cwd,
         helix_view::editor::StatusLineElement::SearchCount => render_search_count,
+        helix_view::editor::StatusLineElement::MacroRecording => render_macro_recording,
+        helix_view::editor::StatusLineElement::PendingKeys => render_pending_keys,
     }
 }
 
@@ -202,6 +208,29 @@ where
 {
     if let Some((current, total)) = context.editor.search_match_count {
         write(context, format!(" [{current}/{total}] ").into());
+    }
+}
+
+fn render_macro_recording<'a, F>(context: &mut RenderContext<'a>, write: F)
+where
+    F: Fn(&mut RenderContext<'a>, Span<'a>) + Copy,
+{
+    if let Some((reg, _)) = context.editor.macro_recording {
+        write(context, format!(" rec @{reg} ").into());
+    }
+}
+
+fn render_pending_keys<'a, F>(context: &mut RenderContext<'a>, write: F)
+where
+    F: Fn(&mut RenderContext<'a>, Span<'a>) + Copy,
+{
+    if !context.pending_keys.is_empty() {
+        let disp: String = context
+            .pending_keys
+            .iter()
+            .map(|k| k.key_sequence_format())
+            .collect();
+        write(context, format!(" {disp} ").into());
     }
 }
 

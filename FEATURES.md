@@ -4,6 +4,42 @@ Custom features added on top of upstream Helix.
 
 ## 2026-06-20
 
+### Noice-style floating command line popup
+- The `:command` prompt, search prompts (`/`, `?`), shell commands (`!`), and all other bottom-line prompts now appear as a centered floating popup window instead of a full-width bottom bar
+- **Icons** distinguish command type: ⚙ for commands, 🔍 for search, ⚡ for shell, 💬 for general prompts — style-able via `[editor.cmdline.icons]`
+- **Completions** render in a separate popup directly below the input box, with scroll indicators when there are more than 10 items
+- **Help text** for typed commands (e.g., `:write` doc) appears in a bordered box above the input
+- **Gradient borders** applied to both the input popup and completion popup when `[editor.gradient-borders]` is enabled
+- The old bottom-style command line has been removed; the floating popup is the only mode
+- Config:
+  ```toml
+  [editor.cmdline]
+  show-icons = true
+  min-popup-width = 40
+  max-popup-width = 80
+  use-full-height = true       # reclaim the bottom row for document content
+
+  [editor.cmdline.icons]
+  search = "🔍"
+  command = "⚙"
+  shell = "⚡"
+  general = "💬"
+  ```
+
+### Full-height mode reclaims bottom row
+- When `use-full-height = true`, the 1-row bottom strip (previously used for status messages and pending keys) is reclaimed — views get one extra row of document content
+- Status messages already route through the toast notification system, so no information is lost
+- Pending key chords and macro recording indicator moved to the statusline
+
+### New statusline elements: pending-keys and macro-recording
+- `pending-keys` — shows pending key chords during disambiguation (e.g., ` g` after pressing `g`)
+- `macro-recording` — shows `rec @r` when recording a macro
+- Add them to any statusline section:
+  ```toml
+  [editor.statusline]
+  right = ["diagnostics", "register", "macro-recording", "pending-keys"]
+  ```
+
 ### Floating command picker with descriptions
 - The `:` command prompt is now a floating, bordered picker instead of a full-width bar at the bottom of the screen
 - Command completions display in two columns: command name (left) and description (right)

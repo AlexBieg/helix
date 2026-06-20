@@ -24,8 +24,6 @@ const GAP: u16 = 1;
 const BORDER: u16 = 1;
 /// Horizontal padding inside the border.
 const PAD: u16 = 1;
-/// Rows reserved at the bottom for the statusline (+ optional status message).
-const BOTTOM_RESERVED: u16 = 2;
 
 /// How long a toast takes to slide into its resting position.
 const SLIDE: Duration = Duration::from_millis(150);
@@ -58,6 +56,7 @@ pub fn render(viewport: Rect, surface: &mut Surface, cx: &mut Context) {
         helix_view::editor::BufferLine::Multiple => cx.editor.documents.len() > 1,
         helix_view::editor::BufferLine::Never => false,
     };
+    let use_full_height = config.cmdline.use_full_height;
     drop(config);
 
     if !enabled || cx.editor.notifications.is_empty() {
@@ -69,7 +68,9 @@ pub fn render(viewport: Rect, surface: &mut Surface, cx: &mut Context) {
 
     // Leave a one-row gap below the bufferline (when shown) or the top edge.
     let top_offset = u16::from(use_bufferline) + TOP_MARGIN;
-    let (toasts, overflow) = layout(viewport, top_offset, &cx.editor.notifications, max_visible);
+    // Reserve bottom rows: 2 normally (statusline + cmdline strip), 1 when full-height popup cmdline
+    let bottom_reserved: u16 = if use_full_height { 1 } else { 2 };
+    let (toasts, overflow) = layout(viewport, top_offset, bottom_reserved, &cx.editor.notifications, max_visible);
 
     let theme = &cx.editor.theme;
     let base_background = theme
@@ -162,7 +163,7 @@ pub fn render(viewport: Rect, surface: &mut Surface, cx: &mut Context) {
         next_y = area.bottom() + GAP;
     }
 
-    if overflow > 0 && next_y < viewport.bottom().saturating_sub(BOTTOM_RESERVED) {
+    if overflow > 0 && next_y < viewport.bottom().saturating_sub(bottom_reserved) {
         let label = format!("+{overflow} more");
         let width = label.width() as u16;
         let x = viewport.right().saturating_sub(width + RIGHT_MARGIN);
@@ -260,6 +261,7 @@ fn dimmed(style: Style, dim: bool) -> Style {
 fn layout(
     viewport: Rect,
     top_offset: u16,
+    bottom_reserved: u16,
     notifications: &Notifications,
     max_visible: usize,
 ) -> (Vec<Toast>, usize) {
@@ -293,7 +295,7 @@ fn layout(
     let box_width = (widest + 2 * BORDER + 2 * PAD).clamp(min_box, max_box);
     let inner_width = box_width.saturating_sub(2 * BORDER + 2 * PAD) as usize;
     let x = viewport.right().saturating_sub(box_width + RIGHT_MARGIN);
-    let bottom_limit = viewport.bottom().saturating_sub(BOTTOM_RESERVED);
+    let bottom_limit = viewport.bottom().saturating_sub(bottom_reserved);
 
     let mut toasts = Vec::new();
     let mut y = viewport.y + top_offset;
