@@ -1,6 +1,6 @@
 use helix_core::{doc_formatter::FormattedGrapheme, Position};
 use helix_view::{
-    graphics::{Color, Modifier, Rect},
+    graphics::{Modifier, Rect},
     theme::Style,
     Document, Theme,
 };
@@ -21,40 +21,20 @@ struct BlameStyles {
 
 impl BlameStyles {
     fn from_theme(theme: &Theme) -> Self {
-        // Use try_get_exact so we don't inherit from parent scopes like "ui".
-        let base = theme.try_get_exact("ui.blame").unwrap_or_default();
+        let base = theme
+            .try_get("ui.blame")
+            .or_else(|| theme.try_get_exact("ui.virtual"))
+            .unwrap_or_default();
         let background = theme
             .try_get_exact("ui.blame.background")
-            .unwrap_or_else(|| base.bg(Color::Indexed(235)));
+            .or_else(|| theme.try_get_exact("ui.popup"))
+            .or_else(|| theme.try_get_exact("ui.statusline"))
+            .unwrap_or(base);
 
-        let commit = styled(
-            theme,
-            "ui.blame.commit",
-            base,
-            Color::Indexed(172),
-            Modifier::BOLD,
-        );
-        let author = styled(
-            theme,
-            "ui.blame.author",
-            base,
-            Color::Indexed(68),
-            Modifier::empty(),
-        );
-        let time = styled(
-            theme,
-            "ui.blame.time",
-            base,
-            Color::Indexed(245),
-            Modifier::DIM,
-        );
-        let summary = styled(
-            theme,
-            "ui.blame.summary",
-            base,
-            Color::Indexed(253),
-            Modifier::empty(),
-        );
+        let commit = styled(theme, "ui.blame.commit", "constant", base, Modifier::BOLD);
+        let author = styled(theme, "ui.blame.author", "function", base, Modifier::empty());
+        let time = styled(theme, "ui.blame.time", "comment", base, Modifier::DIM);
+        let summary = styled(theme, "ui.blame.summary", "string", base, Modifier::empty());
 
         BlameStyles {
             base,
@@ -70,13 +50,16 @@ impl BlameStyles {
 fn styled(
     theme: &Theme,
     scope: &str,
+    fallback_scope: &str,
     base: Style,
-    fallback_fg: Color,
     fallback_mod: Modifier,
 ) -> Style {
     match theme.try_get_exact(scope) {
         Some(s) => base.patch(s).add_modifier(fallback_mod),
-        None => base.fg(fallback_fg).add_modifier(fallback_mod),
+        None => {
+            let semantic = theme.try_get(fallback_scope).unwrap_or_default();
+            base.patch(semantic).add_modifier(fallback_mod)
+        }
     }
 }
 
