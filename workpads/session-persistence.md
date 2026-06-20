@@ -57,5 +57,12 @@
 
 ---
 
+## Bug Fixes (2025-06-20)
+
+- [x] **Active buffer not restored on restart.** `load_session()` stored `active_document_index` but never used it to set focus after loading; focus always ended up on the last-loaded view.
+- [x] **Session saved with empty tree on exit.** `Application::close()` called `save_session()` after all views were destroyed, overwriting the valid session with an empty layout.
+- [x] **Session only saved on last `:q`.** `quit()` and `force_quit()` only called `save_session()` when `views().count() == 1`, so with splits the first `:q` closed a view unsaved, and the second `:q` saved a degraded tree.
+- [x] **Subsequent `:q` calls overwrote full session.** Added `session_saved_this_lifecycle` flag so the session is saved once on the first `:q` (capturing the full layout) and skipped on subsequent `:q` calls that close remaining views.
+
 *Your answers below:*
 

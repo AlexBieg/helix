@@ -1585,6 +1585,10 @@ pub struct Editor {
     /// Recently opened files in MRU order (most recent first).
     /// Includes files whose buffers are now closed.
     pub recent_files: Vec<PathBuf>,
+
+    /// Whether the session has already been saved during this editor lifecycle.
+    /// Prevents overwriting a full session with a degraded one on subsequent :q calls.
+    pub session_saved_this_lifecycle: bool,
 }
 
 pub type Motion = Box<dyn Fn(&mut Editor)>;
@@ -1729,6 +1733,7 @@ impl Editor {
             file_watcher,
             file_watcher_rx,
             recent_files: Vec::new(),
+            session_saved_this_lifecycle: false,
         }
     }
 
@@ -3100,6 +3105,13 @@ impl Editor {
             return Ok(());
         }
 
+        // Don't save a session with no views — it would overwrite a valid session
+        // with empty tree layout. This happens when `close()` runs after all views
+        // have been destroyed.
+        if self.tree.is_empty() {
+            return Ok(());
+        }
+
         let mut doc_info: Vec<(DocumentId, Option<PathBuf>)> = Vec::new();
         for &doc_id in &doc_order {
             if let Some(doc) = self.documents.get(&doc_id) {
@@ -3232,6 +3244,9 @@ impl Editor {
             return Ok(0);
         }
 
+        // Reset the save flag so the next :q will save the session again
+        self.session_saved_this_lifecycle = false;
+
         let mut doc_ids: Vec<DocumentId> = Vec::new();
         let mut old_to_new: HashMap<usize, usize> = HashMap::new();
         for (old_idx, doc_data) in session.documents.iter().enumerate() {
@@ -3361,6 +3376,19 @@ impl Editor {
         }
 
         self.recent_files = session.recent_files.clone();
+
+        // Restore focus to the document that was active when the session was saved
+        if let Some(&new_idx) = old_to_new.get(&session.active_document_index) {
+            let active_doc_id = doc_ids[new_idx];
+            let maybe_view_id = self
+                .tree
+                .views()
+                .find(|(v, _)| v.doc == active_doc_id)
+                .map(|(v, _)| v.id);
+            if let Some(view_id) = maybe_view_id {
+                self.focus(view_id);
+            }
+        }
 
         Ok(doc_ids.len())
     }

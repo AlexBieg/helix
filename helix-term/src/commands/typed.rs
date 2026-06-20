@@ -114,10 +114,17 @@ fn quit(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow
         return Ok(());
     }
 
+    // Save session before closing the first view to capture the full layout.
+    // Only save once per editor lifecycle to avoid overwriting with a degraded
+    // tree on subsequent :q calls that close remaining views.
+    if !cx.editor.session_saved_this_lifecycle {
+        let _ = cx.editor.save_session();
+        cx.editor.session_saved_this_lifecycle = true;
+    }
+
     // last view and we have unsaved changes
     if cx.editor.tree.views().count() == 1 {
         buffers_remaining_impl(cx.editor)?;
-        let _ = cx.editor.save_session();
     }
 
     cx.block_try_flush_writes()?;
@@ -131,8 +138,10 @@ fn force_quit(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> 
         return Ok(());
     }
 
-    if cx.editor.tree.views().count() == 1 {
+    // Save session before closing the first view to capture the full layout.
+    if !cx.editor.session_saved_this_lifecycle {
         let _ = cx.editor.save_session();
+        cx.editor.session_saved_this_lifecycle = true;
     }
 
     cx.block_try_flush_writes()?;
