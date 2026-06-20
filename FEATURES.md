@@ -2,6 +2,15 @@
 
 Custom features added on top of upstream Helix.
 
+## 2026-06-20
+
+### Floating command picker with descriptions
+- The `:` command prompt is now a floating, bordered picker instead of a full-width bar at the bottom of the screen
+- Command completions display in two columns: command name (left) and description (right)
+- Pressing `Backspace` on an empty input closes the picker
+- Tab-selecting a completion expands its description inline with text wrapping, without pushing other items out of view
+- All other completions (files, settings, LSP commands, etc.) are unaffected
+
 ## 2026-06-18
 
 ### Bufferline that follows the active buffer
