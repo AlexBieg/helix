@@ -1,4 +1,5 @@
 use crate::compositor::{Component, Compositor, Context, Event, EventResult};
+use crate::ui::gradient_border::GradientBorder;
 use crate::{alt, ctrl, key, shift, ui};
 use arc_swap::ArcSwap;
 use helix_core::syntax;
@@ -23,7 +24,7 @@ use helix_view::{
 
 type PromptCharHandler = Box<dyn Fn(&mut Prompt, char, &Context)>;
 
-pub type Completion = (RangeFrom<usize>, Span<'static>);
+pub type Completion = (RangeFrom<usize>, Span<'static>, Option<Cow<'static, str>>);
 type CompletionFn = Box<dyn FnMut(&Editor, &str) -> Vec<Completion>>;
 type CallbackFn = Box<dyn FnMut(&mut Context, &str, PromptEvent)>;
 pub type DocFn = Box<dyn Fn(&str) -> Option<Cow<str>>>;
@@ -47,6 +48,8 @@ pub struct Prompt {
     pub doc_fn: DocFn,
     next_char_handler: Option<PromptCharHandler>,
     language: Option<(&'static str, Arc<ArcSwap<syntax::Loader>>)>,
+    border: bool,
+    gradient_border: Option<GradientBorder>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -103,6 +106,8 @@ impl Prompt {
             doc_fn: Box::new(|_| None),
             next_char_handler: None,
             language: None,
+            border: false,
+            gradient_border: None,
         }
     }
 
@@ -130,6 +135,11 @@ impl Prompt {
         loader: Arc<ArcSwap<syntax::Loader>>,
     ) -> Self {
         self.language = Some((language, loader));
+        self
+    }
+
+    pub fn with_border(mut self) -> Self {
+        self.border = true;
         self
     }
 
@@ -386,7 +396,7 @@ impl Prompt {
 
         self.selection = Some(index);
 
-        let (range, item) = &self.completion[index];
+        let (range, item, _desc) = &self.completion[index];
 
         self.line.replace_range(range.clone(), &item.content);
 
@@ -408,12 +418,226 @@ impl Prompt {
         let selected_color = theme.get("ui.menu.selected");
         let suggestion_color = theme.get("ui.text.inactive");
         let background = theme.get("ui.background");
-        // completion
 
+        if self.border {
+            surface.clear_with(area, background);
+
+            let inner = if cx.editor.config().gradient_borders.enable {
+                if self.gradient_border.is_none() {
+                    self.gradient_border = Some(GradientBorder::from_theme(
+                        &cx.editor.theme,
+                        &cx.editor.config().gradient_borders,
+                    ));
+                }
+                if let Some(ref mut gradient_border) = self.gradient_border {
+                    gradient_border.render(
+                        area,
+                        surface,
+                        &cx.editor.theme,
+                        cx.editor.config().rounded_corners,
+                    );
+                }
+                let t: u16 = cx.editor.config().gradient_borders.thickness as u16;
+                Rect {
+                    x: area.x + t,
+                    y: area.y + t,
+                    width: area.width.saturating_sub(t * 2),
+                    height: area.height.saturating_sub(t * 2),
+                }
+            } else {
+                let border_type = BorderType::new(cx.editor.config().rounded_corners);
+                let block = Block::bordered().border_type(border_type);
+                let inner = block.inner(area);
+                block.render(area, surface);
+                inner
+            };
+
+            // -- Render input bar at top
+            let input_bar = inner.clip_left(1).with_height(1);
+            surface.set_string(input_bar.x, input_bar.y, &self.prompt, prompt_color);
+
+            self.line_area = input_bar.clip_left(self.prompt.len() as u16).clip_right(2);
+
+            if self.line.is_empty() {
+                self.anchor = 0;
+                if let Some(suggestion) = self.first_history_completion(cx.editor) {
+                    surface.set_string(
+                        self.line_area.x,
+                        self.line_area.y,
+                        &suggestion,
+                        suggestion_color,
+                    );
+                }
+            } else if let Some((language, loader)) = self.language.as_ref() {
+                let mut text: ui::text::Text = crate::ui::markdown::highlighted_code_block(
+                    &self.line,
+                    language,
+                    Some(&cx.editor.theme),
+                    &loader.load(),
+                    None,
+                )
+                .into();
+                text.render(self.line_area, surface, cx);
+            } else {
+                let line_width = self.line_area.width as usize;
+
+                if self.line.width() < line_width {
+                    self.anchor = 0;
+                } else if self.cursor <= self.anchor {
+                    self.anchor = self.line[..self.cursor]
+                        .grapheme_indices(true)
+                        .next_back()
+                        .map(|(i, _)| i)
+                        .unwrap_or_default();
+                } else if self.line[self.anchor..self.cursor].width() > line_width {
+                    let mut width = 0;
+                    self.anchor = self.line[..self.cursor]
+                        .grapheme_indices(true)
+                        .rev()
+                        .find_map(|(idx, g)| {
+                            width += g.width();
+                            if width > line_width {
+                                Some(idx + g.len())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap();
+                }
+
+                self.truncate_start = self.anchor > 0;
+                self.truncate_end = self.line[self.anchor..].width() > line_width;
+
+                if self.truncate_end
+                    && self.line[self.anchor..self.cursor].width() >= line_width
+                {
+                    self.anchor += self.line[self.anchor..]
+                        .grapheme_indices(true)
+                        .find_map(|(idx, g)| {
+                            if g.width() > 0 {
+                                Some(idx + g.len())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap();
+                }
+
+                surface.set_string_anchored(
+                    self.line_area.x,
+                    self.line_area.y,
+                    self.truncate_start,
+                    self.truncate_end,
+                    &self.line.as_str()[self.anchor..],
+                    line_width,
+                    |_| prompt_color,
+                );
+            }
+
+            // -- Separator
+            let sep_style = cx.editor.theme.get("ui.background.separator");
+            let borders = BorderType::line_symbols(BorderType::Plain);
+            for x in inner.left()..inner.right() {
+                if let Some(cell) = surface.get_mut(x, inner.y + 1) {
+                    cell.set_symbol(borders.horizontal).set_style(sep_style);
+                }
+            }
+
+            // -- Render completions below separator
+            let completions_area = inner.clip_top(2);
+
+            let col_width = completions_area.width.saturating_sub(1);
+
+            // Split available width: 25% for name, 75% for description
+            let name_width = (col_width as u32 * 25 / 100) as u16;
+            let desc_width = col_width.saturating_sub(name_width).saturating_sub(1);
+
+            let height = completions_area.height.min(10);
+
+            if height > 0 && !self.completion.is_empty() {
+                let completion_area = Rect::new(
+                    completions_area.x,
+                    completions_area.y,
+                    completions_area.width,
+                    height,
+                );
+
+                surface.clear_with(completion_area, background);
+
+                let mut row: u16 = 0;
+
+                // Start from the selection (or 0) so the selected item is always visible
+                let start = self.selection.unwrap_or(0).saturating_sub(1);
+
+                for (i, (_range, completion, desc)) in
+                    self.completion.iter().enumerate().skip(start)
+                {
+                    if row >= completion_area.height {
+                        break;
+                    }
+                    let is_selected = Some(i) == self.selection;
+
+                    let completion_item_style = if is_selected {
+                        selected_color
+                    } else {
+                        completion.style
+                    };
+
+                    surface.set_stringn(
+                        completion_area.x,
+                        completion_area.y + row,
+                        &completion.content,
+                        name_width as usize,
+                        completion_item_style,
+                    );
+
+                    if let Some(desc) = desc {
+                        if is_selected {
+                            let mut text = ui::Text::new(desc.to_string());
+                            let (_w, desc_lines) =
+                                ui::text::required_size(&text.contents, desc_width);
+                            let desc_lines = desc_lines
+                                .min(5)
+                                .min(completion_area.height.saturating_sub(row));
+                            if desc_lines > 0 {
+                                let desc_area = Rect::new(
+                                    completion_area.x + name_width + 1,
+                                    completion_area.y + row,
+                                    desc_width,
+                                    desc_lines,
+                                );
+                                text.render(desc_area, surface, cx);
+                            }
+                            row += desc_lines.max(1);
+                        } else {
+                            let desc_style = suggestion_color;
+                            surface.set_stringn(
+                                completion_area.x + name_width + 1,
+                                completion_area.y + row,
+                                desc,
+                                desc_width as usize,
+                                desc_style,
+                            );
+                            row += 1;
+                        }
+                    } else {
+                        row += 1;
+                    }
+                }
+
+                // Clear any remaining area below completions
+                let below = completions_area.clip_top(row);
+                surface.clear_with(below, background);
+            }
+
+            return;
+        }
+
+        // Existing layout: input at bottom, completions above
         let max_len = self
             .completion
             .iter()
-            .map(|(_, completion)| completion.content.len() as u16)
+            .map(|(_, completion, _desc)| completion.content.len() as u16)
             .max()
             .unwrap_or(BASE_WIDTH)
             .max(BASE_WIDTH);
@@ -449,7 +673,7 @@ impl Prompt {
             let mut row = 0;
             let mut col = 0;
 
-            for (i, (_range, completion)) in
+            for (i, (_range, completion, _desc)) in
                 self.completion.iter().enumerate().skip(offset).take(items)
             {
                 let is_selected = Some(i) == self.selection;
@@ -653,6 +877,10 @@ impl Component for Prompt {
                 (self.callback_fn)(cx, &self.line, PromptEvent::Update);
             }
             ctrl!('h') | key!(Backspace) | shift!(Backspace) => {
+                if self.line.is_empty() {
+                    (self.callback_fn)(cx, &self.line, PromptEvent::Abort);
+                    return close_fn;
+                }
                 self.delete_char_backwards(cx.editor);
                 (self.callback_fn)(cx, &self.line, PromptEvent::Update);
             }
@@ -738,7 +966,7 @@ impl Component for Prompt {
                     .editor
                     .registers
                     .iter_preview()
-                    .map(|(ch, preview)| (0.., format!("{} {}", ch, &preview).into()))
+                    .map(|(ch, preview)| (0.., format!("{} {}", ch, &preview).into(), None))
                     .collect();
                 self.next_char_handler = Some(Box::new(|prompt, c, context| {
                     prompt.insert_str(
@@ -772,6 +1000,23 @@ impl Component for Prompt {
     }
 
     fn cursor(&self, area: Rect, editor: &Editor) -> (Option<Position>, CursorKind) {
+        let area = if self.border {
+            let inner = if editor.config().gradient_borders.enable {
+                let t: u16 = editor.config().gradient_borders.thickness as u16;
+                Rect {
+                    x: area.x + t,
+                    y: area.y + t,
+                    width: area.width.saturating_sub(t * 2),
+                    height: area.height.saturating_sub(t * 2),
+                }
+            } else {
+                let block = Block::bordered();
+                block.inner(area)
+            };
+            inner.clip_left(1).with_height(1)
+        } else {
+            area
+        };
         let area = area
             .clip_left(self.prompt.len() as u16)
             .clip_right(if self.prompt.is_empty() { 2 } else { 0 });
@@ -792,7 +1037,11 @@ impl Component for Prompt {
                 .map_or(0, |g| g.width());
         }
 
-        let line = area.height as usize - 1;
+        let line = if self.border {
+            0
+        } else {
+            area.height as usize - 1
+        };
 
         (
             Some(Position::new(area.y as usize + line, col)),

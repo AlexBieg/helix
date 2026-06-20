@@ -23,6 +23,14 @@ pub fn overlaid<T>(content: T) -> Overlay<T> {
     }
 }
 
+/// Like [`overlaid`] but with reduced dimensions (60% width, 25% height)
+pub fn overlaid_compact<T>(content: T) -> Overlay<T> {
+    Overlay {
+        content,
+        calc_child_size: Box::new(|rect: Rect| clip_rect_relative(rect.clip_bottom(2), 60, 25)),
+    }
+}
+
 fn clip_rect_relative(rect: Rect, percent_horizontal: u8, percent_vertical: u8) -> Rect {
     fn mul_and_cast(size: u16, factor: u8) -> u16 {
         ((size as u32) * (factor as u32) / 100).try_into().unwrap()

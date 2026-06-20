@@ -17,6 +17,7 @@ use helix_view::editor::{CloseError, ConfigEvent};
 use helix_view::expansion;
 use serde_json::Value;
 use ui::completers::{self, Completer};
+use ui::overlay::overlaid_compact;
 
 #[derive(Clone)]
 pub struct TypableCommand {
@@ -4259,12 +4260,13 @@ pub(super) fn command_mode(cx: &mut Context) {
                 cx.editor.set_error(err.to_string());
             }
         },
-    );
+    )
+    .with_border();
     prompt.doc_fn = Box::new(command_line_doc);
 
     // Calculate initial completion
     prompt.recalculate_completion(cx.editor);
-    cx.push_layer(Box::new(prompt));
+    cx.push_layer(Box::new(overlaid_compact(prompt)));
 }
 
 fn command_line_doc(input: &str) -> Option<Cow<'_, str>> {
@@ -4349,7 +4351,12 @@ fn complete_command_line(editor: &Editor, input: &str) -> Vec<ui::prompt::Comple
             false,
         )
         .into_iter()
-        .map(|(name, _)| (0.., name.into()))
+        .map(|(name, _)| {
+            let doc = TYPABLE_COMMAND_MAP
+                .get(name)
+                .map(|cmd| Cow::Borrowed(cmd.doc));
+            (0.., name.into(), doc)
+        })
         .collect()
     } else {
         TYPABLE_COMMAND_MAP
@@ -4424,7 +4431,7 @@ pub fn complete_command_args(
 
                     completer(editor, &token.content)
                         .into_iter()
-                        .map(|(range, span)| quote_completion(&token, range, span, offset))
+                        .map(|(range, span, _desc)| quote_completion(&token, range, span, offset))
                         .collect()
                 }
                 CompletionState::Flag(_) => fuzzy_match(
@@ -4433,7 +4440,7 @@ pub fn complete_command_args(
                     false,
                 )
                 .into_iter()
-                .map(|(name, _)| ((offset + token.content_start).., format!("--{name}").into()))
+                .map(|(name, _)| ((offset + token.content_start).., format!("--{name}").into(), None))
                 .collect(),
                 CompletionState::FlagArgument(flag) => fuzzy_match(
                     &token.content,
@@ -4442,7 +4449,7 @@ pub fn complete_command_args(
                     false,
                 )
                 .into_iter()
-                .map(|(value, _)| ((offset + token.content_start).., (*value).into()))
+                .map(|(value, _)| ((offset + token.content_start).., (*value).into(), None))
                 .collect(),
             }
         }
@@ -4483,7 +4490,7 @@ fn quote_completion<'a>(
     range: ops::RangeFrom<usize>,
     mut span: Span<'a>,
     offset: usize,
-) -> (ops::RangeFrom<usize>, Span<'a>) {
+) -> (ops::RangeFrom<usize>, Span<'a>, Option<Cow<'static, str>>) {
     fn replace<'a>(text: Cow<'a, str>, from: char, to: &str) -> Cow<'a, str> {
         if text.contains(from) {
             Cow::Owned(text.replace(from, to))
@@ -4503,19 +4510,19 @@ fn quote_completion<'a>(
             // Ignore `range.start` here since we're replacing the entire token. We used
             // `range.start` above to emulate the replacement that using `range.start` would have
             // done.
-            ((offset + token.content_start).., span)
+            ((offset + token.content_start).., span, None)
         }
         TokenKind::Quoted(quote) => {
             span.content = replace(span.content, quote.char(), quote.escape());
-            ((range.start + offset + token.content_start).., span)
+            ((range.start + offset + token.content_start).., span, None)
         }
         TokenKind::Expand => {
             // NOTE: `token.content_start` is already accounted for in `offset` for `Expand`
             // tokens.
             span.content = replace(span.content, '"', "\"\"");
-            ((range.start + offset).., span)
+            ((range.start + offset).., span, None)
         }
-        _ => ((range.start + offset + token.content_start).., span),
+        _ => ((range.start + offset + token.content_start).., span, None),
     }
 }
 
@@ -4571,7 +4578,7 @@ fn complete_expand(
         // If no expansions were found and an argument is being completed,
         Some(completer) if start == 0 => completer(editor, &token.content)
             .into_iter()
-            .map(|(range, span)| quote_completion(token, range, span, offset))
+            .map(|(range, span, _desc)| quote_completion(token, range, span, offset))
             .collect(),
         _ => Vec::new(),
     }
@@ -4586,7 +4593,7 @@ fn complete_variable_expansion(content: &str, offset: usize) -> Vec<ui::prompt::
         false,
     )
     .into_iter()
-    .map(|(name, _)| (offset.., (*name).into()))
+    .map(|(name, _)| (offset.., (*name).into(), None))
     .collect()
 }
 
@@ -4602,7 +4609,7 @@ fn complete_register_expansion(
         .collect();
     fuzzy_match(content, register_names, false)
         .into_iter()
-        .map(|(name, _)| (offset.., name.to_string().into()))
+        .map(|(name, _)| (offset.., name.to_string().into(), None))
         .collect()
 }
 
@@ -4619,7 +4626,7 @@ fn complete_expansion_kind(content: &str, offset: usize) -> Vec<ui::prompt::Comp
         false,
     )
     .into_iter()
-    .map(|(name, _)| (offset.., (*name).into()))
+    .map(|(name, _)| (offset.., (*name).into(), None))
     .collect()
 }
 

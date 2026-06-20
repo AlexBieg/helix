@@ -454,7 +454,7 @@ pub mod completers {
 
         fuzzy_match(input, names, true)
             .into_iter()
-            .map(|(name, _)| ((0..), name.into()))
+            .map(|(name, _)| ((0..), name.into(), None))
             .collect()
     }
 
@@ -470,7 +470,7 @@ pub mod completers {
 
         fuzzy_match(input, names, false)
             .into_iter()
-            .map(|(name, _)| ((0..), name.into()))
+            .map(|(name, _)| ((0..), name.into(), None))
             .collect()
     }
 
@@ -496,7 +496,7 @@ pub mod completers {
 
         fuzzy_match(input, language_servers, false)
             .into_iter()
-            .map(|(name, _)| ((0..), Span::raw(name.to_string())))
+            .map(|(name, _)| ((0..), Span::raw(name.to_string()), None))
             .collect()
     }
 
@@ -511,7 +511,7 @@ pub mod completers {
 
         fuzzy_match(input, language_servers, false)
             .into_iter()
-            .map(|(name, _)| ((0..), Span::raw(name.to_string())))
+            .map(|(name, _)| ((0..), Span::raw(name.to_string()), None))
             .collect()
     }
 
@@ -525,7 +525,7 @@ pub mod completers {
 
         fuzzy_match(input, &*KEYS, false)
             .into_iter()
-            .map(|(name, _)| ((0..), Span::raw(name)))
+            .map(|(name, _)| ((0..), Span::raw(name), None))
             .collect()
     }
 
@@ -558,7 +558,7 @@ pub mod completers {
 
         fuzzy_match(input, language_ids, false)
             .into_iter()
-            .map(|(name, _)| ((0..), name.to_owned().into()))
+            .map(|(name, _)| ((0..), name.to_owned().into(), None))
             .collect()
     }
 
@@ -574,7 +574,7 @@ pub mod completers {
 
         fuzzy_match(input, commands, false)
             .into_iter()
-            .map(|(name, _)| ((0..), name.to_owned().into()))
+            .map(|(name, _)| ((0..), name.to_owned().into(), None))
             .collect()
     }
 
@@ -714,15 +714,15 @@ pub mod completers {
             let range = (input.len().saturating_sub(file_name.len()))..;
             fuzzy_match(&file_name, files, true)
                 .into_iter()
-                .map(|(name, _)| (range.clone(), style_from_file(name)))
+                .map(|(name, _)| (range.clone(), style_from_file(name), None))
                 .collect()
 
             // TODO: complete to longest common match
         } else {
             let mut files: Vec<_> = files
-                .map(|file| (end.clone(), style_from_file(file)))
+                .map(|file| (end.clone(), style_from_file(file), None))
                 .collect();
-            files.sort_unstable_by(|(_, path1), (_, path2)| path1.content.cmp(&path2.content));
+            files.sort_unstable_by(|(_, path1, _), (_, path2, _)| path1.content.cmp(&path2.content));
             files
         }
     }
@@ -737,7 +737,7 @@ pub mod completers {
 
         fuzzy_match(input, iter, false)
             .into_iter()
-            .map(|(name, _)| ((0..), name.into()))
+            .map(|(name, _)| ((0..), name.into(), None))
             .collect()
     }
 
@@ -765,7 +765,7 @@ pub mod completers {
 
         fuzzy_match(input, PROGRAMS_IN_PATH.iter(), false)
             .into_iter()
-            .map(|(name, _)| ((0..), name.clone().into()))
+            .map(|(name, _)| ((0..), name.clone().into(), None))
             .collect()
     }
 
