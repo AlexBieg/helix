@@ -21,7 +21,7 @@ use slotmap::SlotMap;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -584,6 +584,9 @@ pub struct Registry {
     syn_loader: Arc<ArcSwap<helix_core::syntax::Loader>>,
     pub incoming: SelectAll<UnboundedReceiverStream<(LanguageServerId, Call)>>,
     pub file_event_handler: file_event::Handler,
+    /// LanguageServerIds for synthetic "servers" that don't have a backing
+    /// process but whose diagnostics should still be rendered inline.
+    synthetic_ids: HashSet<LanguageServerId>,
 }
 
 impl Registry {
@@ -594,11 +597,20 @@ impl Registry {
             syn_loader,
             incoming: SelectAll::new(),
             file_event_handler: file_event::Handler::new(),
+            synthetic_ids: HashSet::new(),
         }
     }
 
     pub fn get_by_id(&self, id: LanguageServerId) -> Option<&Arc<Client>> {
         self.inner.get(id)
+    }
+
+    pub fn register_mcp_agent(&mut self, id: LanguageServerId) {
+        self.synthetic_ids.insert(id);
+    }
+
+    pub fn is_mcp_agent_id(&self, id: LanguageServerId) -> bool {
+        self.synthetic_ids.contains(&id)
     }
 
     pub fn remove_by_id(&mut self, id: LanguageServerId) {

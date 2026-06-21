@@ -84,6 +84,14 @@ slotmap::new_key_type! {
     pub struct LanguageServerId;
 }
 
+impl LanguageServerId {
+    /// Create a `LanguageServerId` from a raw u64.
+    /// Used by external diagnostic providers (e.g., MCP agent diagnostics).
+    pub fn from_u64(id: u64) -> Self {
+        LanguageServerId(slotmap::KeyData::from_ffi(id))
+    }
+}
+
 impl fmt::Display for LanguageServerId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.0)

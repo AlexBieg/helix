@@ -17,6 +17,7 @@
   - [Commands](./commands.md)
   - [Language servers](./lsp.md)
   - [Language support](./lang-support.md)
+  - [MCP Server](./mcp.md)
   - [Workspace trust](./workspace-trust.md)
 - [Ecosystem](./ecosystem.md)
   - [Migrating from Vim](./from-vim.md)

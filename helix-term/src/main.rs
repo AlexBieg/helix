@@ -24,7 +24,8 @@ fn main() -> Result<()> {
 
 #[tokio::main]
 async fn main_impl() -> Result<i32> {
-    let args = Args::parse_args().context("could not parse arguments")?;
+    #[cfg_attr(not(feature = "mcp"), allow(unused_mut))]
+    let mut args = Args::parse_args().context("could not parse arguments")?;
 
     helix_loader::initialize_config_file(args.config_file.clone());
     helix_loader::initialize_log_file(args.log_file.clone());
@@ -100,6 +101,75 @@ FLAGS:
         return Ok(0);
     }
 
+    #[cfg(feature = "mcp")]
+    if args.mcp_info {
+        let socket_path = {
+            let cfg = helix_mcp_server::McpConfig::default();
+            cfg.socket_path()
+        };
+        let info = serde_json::json!({
+            "pid": std::process::id(),
+            "socket": socket_path.to_string_lossy(),
+            "worktree": std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            "connections": 0,
+        });
+        println!("{}", serde_json::to_string_pretty(&info).unwrap());
+        return Ok(0);
+    }
+
+    #[cfg(feature = "mcp")]
+    if args.mcp_list {
+        let dir = {
+            let cfg = helix_mcp_server::McpConfig::default();
+            let socket = cfg.socket_path();
+            socket.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| {
+                let mut tmp = std::env::temp_dir();
+                tmp.push("helix-mcp");
+                tmp
+            })
+        };
+        let mut instances = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if let Some(ext) = entry_path.extension() {
+                    if ext == "sock" {
+                        let pid_str = entry_path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("");
+                        let socket_path = entry_path.to_string_lossy().to_string();
+                        let instance = serde_json::json!({
+                            "pid": pid_str,
+                            "socket": socket_path,
+                        });
+                        instances.push(instance);
+                    }
+                }
+            }
+        }
+        // Also check temp dir for Windows metadata files
+        let mut tmp_dir = std::env::temp_dir();
+        tmp_dir.push("helix-mcp");
+        if let Ok(entries) = std::fs::read_dir(&tmp_dir) {
+            for entry in entries.flatten() {
+                if let Some(ext) = entry.path().extension() {
+                    if ext == "json" {
+                        if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                                instances.push(val);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        println!("{}", serde_json::to_string_pretty(&instances).unwrap());
+        return Ok(0);
+    }
+
     setup_logging(args.verbosity).context("failed to initialize logging")?;
 
     // NOTE: Set the working directory early so the correct configuration is loaded. Be aware that
@@ -139,6 +209,63 @@ FLAGS:
             let _ = std::io::stdin().read(&mut []);
             helix_core::config::default_lang_loader()
         });
+
+    #[cfg(feature = "mcp")]
+    if args.headless {
+        // Headless mode: MCP server only, no TUI.
+        args.mcp = true;
+
+        let (confirmation_tx, mut confirmation_rx) = tokio::sync::mpsc::unbounded_channel::<
+            helix_mcp_server::security::ConfirmationRequest,
+        >();
+        let mcp_context = std::sync::Arc::new(helix_mcp_server::McpContext::new());
+        let mut mcp_config = helix_mcp_server::McpConfig::default();
+        mcp_config.enable = true;
+        if let Some(ref socket) = args.mcp_socket {
+            mcp_config.socket = Some(socket.clone());
+        }
+
+        // Open file arguments in the snapshot so they are accessible via MCP tools
+        let mut next_id: usize = 1;
+        for (path, _) in &args.files {
+            if !path.is_dir() {
+                let doc_id = next_id.to_string();
+                mcp_context.load_file(&doc_id, &path.to_string_lossy());
+                next_id += 1;
+            }
+        }
+
+        let server =
+            helix_mcp_server::HelixMcpServer::new(mcp_context.clone(), mcp_config, confirmation_tx);
+        tokio::spawn(async move {
+            if let Err(e) = server.bind_and_serve().await {
+                log::error!("MCP server error: {}", e);
+            }
+        });
+
+        // Auto-accept confirmation requests in headless mode
+        tokio::spawn(async move {
+            while let Some(req) = confirmation_rx.recv().await {
+                let _ = req.response_tx.send(true);
+            }
+        });
+
+        log::info!(
+            "Headless MCP server started on {} (pid: {})",
+            helix_mcp_server::McpConfig::default()
+                .socket_path()
+                .display(),
+            std::process::id()
+        );
+
+        use signal_hook::consts::signal::{SIGINT, SIGTERM};
+        use signal_hook_tokio::Signals;
+        let mut signals = Signals::new([SIGINT, SIGTERM]).context("build signal handler")?;
+        use futures_util::StreamExt;
+        signals.next().await;
+        log::info!("Shutting down headless MCP server");
+        return Ok(0);
+    }
 
     // TODO: use the thread local executor to spawn the application task separately from the work pool
     let mut app = Application::new(args, config, lang_loader).context("unable to start Helix")?;

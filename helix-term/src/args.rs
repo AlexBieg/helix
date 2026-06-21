@@ -20,6 +20,12 @@ pub struct Args {
     pub config_file: Option<PathBuf>,
     pub files: IndexMap<PathBuf, Vec<Position>>,
     pub working_directory: Option<PathBuf>,
+    pub headless: bool,
+    pub mcp: bool,
+    pub no_mcp: bool,
+    pub mcp_socket: Option<PathBuf>,
+    pub mcp_info: bool,
+    pub mcp_list: bool,
 }
 
 impl Args {
@@ -62,6 +68,15 @@ impl Args {
                     args.health = true;
                     args.health_arg = argv.next_if(|opt| !opt.starts_with('-'));
                 }
+                "--headless" => args.headless = true,
+                "--mcp" => args.mcp = true,
+                "--no-mcp" => args.no_mcp = true,
+                "--mcp-info" => args.mcp_info = true,
+                "--mcp-list" => args.mcp_list = true,
+                "--mcp-socket" => match argv.next().as_deref() {
+                    Some(path) => args.mcp_socket = Some(path.into()),
+                    None => anyhow::bail!("--mcp-socket must specify a socket path"),
+                },
                 "-g" | "--grammar" => match argv.next().as_deref() {
                     Some("fetch") => args.fetch_grammars = true,
                     Some("build") => args.build_grammars = true,

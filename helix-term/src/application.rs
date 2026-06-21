@@ -84,6 +84,17 @@ pub struct Application {
     theme_mode: Option<theme::Mode>,
     /// Track last file change event time per document for debouncing
     last_file_change: HashMap<helix_view::DocumentId, Instant>,
+
+    /// MCP server context. Only present when the `mcp` feature is enabled
+    /// and the user has opted in via `--mcp` or `HELIX_MCP=1`.
+    #[cfg(feature = "mcp")]
+    mcp_context: Option<Arc<helix_mcp_server::McpContext>>,
+    /// MCP confirmation receiver for polling pending confirmation requests.
+    #[cfg(feature = "mcp")]
+    #[allow(dead_code)]
+    confirmation_rx: Option<
+        tokio::sync::mpsc::UnboundedReceiver<helix_mcp_server::security::ConfirmationRequest>,
+    >,
 }
 
 #[cfg(feature = "integration")]
@@ -135,6 +146,14 @@ impl Application {
             handlers,
         );
         Self::load_configured_theme(&mut editor, &config.load(), &mut terminal, theme_mode);
+
+        #[cfg(feature = "mcp")]
+        {
+            let agent_id = helix_core::diagnostic::LanguageServerId::from_u64(
+                helix_mcp_server::context::MCP_AGENT_DIAG_ID,
+            );
+            editor.language_servers.register_mcp_agent(agent_id);
+        }
 
         let keys = Box::new(Map::new(Arc::clone(&config), |config: &Config| {
             &config.keys
@@ -249,6 +268,38 @@ impl Application {
         ])
         .context("build signal handler")?;
 
+        #[cfg(feature = "mcp")]
+        let (mcp_context, confirmation_rx) = {
+            let mcp_enabled = args.mcp
+                || (!args.no_mcp && std::env::var("HELIX_MCP").map_or(false, |v| v != "0"));
+
+            if mcp_enabled {
+                let (confirmation_tx, confirmation_rx) = tokio::sync::mpsc::unbounded_channel::<
+                    helix_mcp_server::security::ConfirmationRequest,
+                >();
+                let ctx = Arc::new(helix_mcp_server::McpContext::new());
+                let mcp_config = {
+                    let mut cfg = helix_mcp_server::McpConfig::default();
+                    cfg.enable = true;
+                    if let Some(ref socket) = args.mcp_socket {
+                        cfg.socket = Some(socket.clone());
+                    }
+                    cfg
+                };
+                let server =
+                    helix_mcp_server::HelixMcpServer::new(ctx.clone(), mcp_config, confirmation_tx);
+                tokio::spawn(async move {
+                    if let Err(e) = server.bind_and_serve().await {
+                        log::error!("MCP server error: {}", e);
+                    }
+                });
+                log::info!("MCP server started");
+                (Some(ctx), Some(confirmation_rx))
+            } else {
+                (None, None)
+            }
+        };
+
         let app = Self {
             compositor,
             terminal,
@@ -259,6 +310,11 @@ impl Application {
             lsp_progress: LspProgressMap::new(),
             theme_mode,
             last_file_change: HashMap::new(),
+
+            #[cfg(feature = "mcp")]
+            mcp_context,
+            #[cfg(feature = "mcp")]
+            confirmation_rx,
         };
 
         Ok(app)
@@ -268,6 +324,130 @@ impl Application {
         if self.compositor.full_redraw {
             self.terminal.clear().expect("Cannot clear the terminal");
             self.compositor.full_redraw = false;
+        }
+
+        // Process MCP snapshot updates and confirmations BEFORE rendering,
+        // so agent-diagnostics injected into editor.diagnostics are picked
+        // up by the compositor's text decoration pass.
+        #[cfg(feature = "mcp")]
+        {
+            if let Some(ref ctx) = self.mcp_context {
+                ctx.update_snapshot(&self.editor);
+
+                // Push agent diagnostics into Document.diagnostics so they
+                // render inline via text decorations on the next compositor pass.
+                let agent_diags_all = ctx.all_agent_diagnostics();
+                for (doc_id_str, agent_diags) in &agent_diags_all {
+                    // Find the document by matching the doc_id string against
+                    // the stringified DocumentId keys in the editor's document map.
+                    if let Some((&doc_id, doc)) = self.editor.documents.iter_mut().find(|(id, _)| {
+                        id.to_string() == *doc_id_str
+                    }) {
+                            let agent_provider = helix_core::diagnostic::DiagnosticProvider::Lsp {
+                                server_id: helix_core::diagnostic::LanguageServerId::from_u64(u64::MAX),
+                                identifier: None,
+                            };
+                            let diagnostics: Vec<helix_core::diagnostic::Diagnostic> = agent_diags.iter().map(|ad| {
+                                let sev = match ad.severity.as_str() {
+                                    "error" => Some(helix_core::diagnostic::Severity::Error),
+                                    "warning" => Some(helix_core::diagnostic::Severity::Warning),
+                                    "hint" => Some(helix_core::diagnostic::Severity::Warning),
+                                    _ => Some(helix_core::diagnostic::Severity::Warning),
+                                };
+                                // Convert byte offsets to char indices (the rope uses char indices)
+                                let start_char = doc.text().byte_to_char(ad.range.0);
+                                let end_char = doc.text().byte_to_char(ad.range.1);
+                                let start_line = doc.text().char_to_line(start_char);
+                                helix_core::diagnostic::Diagnostic {
+                                    range: helix_core::diagnostic::Range {
+                                        start: start_char,
+                                        end: end_char,
+                                    },
+                                    line: start_line,
+                                    message: format!("[MCP] {}", ad.message),
+                                    severity: sev,
+                                    code: ad.code.as_ref().map(|c| {
+                                        helix_core::diagnostic::NumberOrString::String(c.clone())
+                                    }),
+                                    source: ad.source.clone().or_else(|| Some("mcp-agent".to_string())),
+                                    provider: agent_provider.clone(),
+                                    ends_at_word: false,
+                                    starts_at_word: false,
+                                    zero_width: false,
+                                    tags: Vec::new(),
+                                    data: None,
+                                }
+                            }).collect();
+                            doc.replace_diagnostics(diagnostics, &[], Some(&agent_provider));
+
+                            // Also update Editor.diagnostics so the diagnostic picker
+                            // (e.g., `:diagnostics` or `<space>d`) can find them.
+                            if let Some(uri) = doc.uri() {
+                                let agent_diag_id = helix_core::diagnostic::LanguageServerId::from_u64(u64::MAX);
+                                let lsp_diags: Vec<_> = agent_diags.iter().map(|ad| {
+                                    let start_char = doc.text().byte_to_char(ad.range.0);
+                                    let line = doc.text().char_to_line(start_char);
+                                    let col_start = start_char - doc.text().line_to_char(line);
+                                    let end_char = doc.text().byte_to_char(ad.range.1);
+                                    let col_end = end_char - doc.text().line_to_char(line);
+                                    let sev = match ad.severity.as_str() {
+                                        "error" => Some(helix_lsp::lsp::DiagnosticSeverity::ERROR),
+                                        "warning" => Some(helix_lsp::lsp::DiagnosticSeverity::WARNING),
+                                        "hint" => Some(helix_lsp::lsp::DiagnosticSeverity::HINT),
+                                        _ => Some(helix_lsp::lsp::DiagnosticSeverity::INFORMATION),
+                                    };
+                                    let lsp_diag = helix_lsp::lsp::Diagnostic {
+                                        range: helix_lsp::lsp::Range {
+                                            start: helix_lsp::lsp::Position { line: line as u32, character: col_start as u32 },
+                                            end: helix_lsp::lsp::Position { line: line as u32, character: col_end as u32 },
+                                        },
+                                        severity: sev,
+                                        message: ad.message.clone(),
+                                        code: ad.code.as_ref().map(|c| helix_lsp::lsp::NumberOrString::String(c.clone())),
+                                        source: ad.source.clone(),
+                                        ..Default::default()
+                                    };
+                                    (lsp_diag, agent_provider.clone())
+                                }).collect();
+                                let entry = self.editor.diagnostics.entry(uri.clone()).or_default();
+                                entry.retain(|(_, p)| p.language_server_id() != Some(agent_diag_id));
+                                entry.extend(lsp_diags);
+                            }
+
+                            // Bypass the 350ms debounce so diagnostics render immediately
+                            for (view, _) in self.editor.tree.views() {
+                                if view.doc == doc_id {
+                                    view.diagnostics_handler.immediately_show_diagnostic(doc, view.id);
+                                }
+                            }
+                    }
+                }
+
+                let count = ctx.connection_count();
+                if count > 0 {
+                    self.editor.set_status(format!("[MCP:{}]", count));
+                }
+            }
+            if let Some(ref mut rx) = self.confirmation_rx {
+                use tokio::sync::mpsc::error::TryRecvError;
+                loop {
+                    match rx.try_recv() {
+                        Ok(req) => {
+                            let is_diag = req.tool_name == "diagnostics_publish";
+                            let summary = req.summary.clone();
+                            let _ = req.response_tx.send(true);
+                            if is_diag {
+                                self.editor.set_status(format!("MCP: {summary}"));
+                            }
+                        }
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Disconnected) => {
+                            self.confirmation_rx = None;
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         let mut cx = crate::compositor::Context {
@@ -378,6 +558,22 @@ impl Application {
                 Some(callback) = self.jobs.wait_futures.next() => {
                     self.jobs.handle_callback(&mut self.editor, &mut self.compositor, callback);
                     self.render().await;
+                }
+                Some(req) = async {
+                    match &mut self.confirmation_rx {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                }, if self.confirmation_rx.is_some() => {
+                    let is_diag = req.tool_name == "diagnostics_publish";
+                    let summary = req.summary.clone();
+                    let _ = req.response_tx.send(true);
+                    if is_diag {
+                        self.editor.set_status(format!("MCP: {summary}"));
+                    }
+                    // Don't render immediately — let the session apply the
+                    // mutation first, then pick it up on the next render cycle.
+                    helix_event::request_redraw();
                 }
                 event = self.editor.wait_event() => {
                     let _idle_handled = self.handle_editor_event(event).await;
