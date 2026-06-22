@@ -503,89 +503,166 @@ impl Application {
 
             use futures_util::StreamExt;
 
-            tokio::select! {
-                biased;
+            #[cfg(feature = "mcp")]
+            {
+                tokio::select! {
+                    biased;
 
-                Some(signal) = self.signals.next() => {
-                    if !self.handle_signals(signal).await {
-                        return false;
-                    };
-                }
-                Some(event) = input_stream.next() => {
-                    let mut should_redraw = self.handle_terminal_events(event);
-
-                    // Coalesce any input events that are already queued so a burst
-                    // of events (e.g. rapid mouse-wheel scrolling) is processed in a
-                    // single render pass instead of one expensive render per event.
-                    // We poll the stream with the real task waker (via poll_fn) rather
-                    // than `now_or_never`: termina's EventStream registers its wake task
-                    // on the *first* `Pending` poll, so a noop-waker poll would leave the
-                    // real waker unregistered and hang the editor.
-                    //
-                    // Bound the drain to a single frame's worth of time so a sustained
-                    // burst (holding scroll) still renders at ~60fps instead of freezing
-                    // the view until the burst ends; remaining events are picked up on
-                    // the next loop iteration.
-                    let coalesce_deadline = Instant::now() + std::time::Duration::from_millis(16);
-                    while !self.editor.should_close() && Instant::now() < coalesce_deadline {
-                        let poll = std::future::poll_fn(|cx| {
-                            std::task::Poll::Ready(input_stream.poll_next_unpin(cx))
-                        })
-                        .await;
-                        let std::task::Poll::Ready(Some(event)) = poll else {
-                            break;
+                    Some(signal) = self.signals.next() => {
+                        if !self.handle_signals(signal).await {
+                            return false;
                         };
-                        should_redraw |= self.handle_terminal_events(event);
                     }
+                    Some(event) = input_stream.next() => {
+                        let mut should_redraw = self.handle_terminal_events(event);
 
-                    if should_redraw && !self.editor.should_close() {
+                        // Coalesce any input events that are already queued so a burst
+                        // of events (e.g. rapid mouse-wheel scrolling) is processed in a
+                        // single render pass instead of one expensive render per event.
+                        // We poll the stream with the real task waker (via poll_fn) rather
+                        // than `now_or_never`: termina's EventStream registers its wake task
+                        // on the *first* `Pending` poll, so a noop-waker poll would leave the
+                        // real waker unregistered and hang the editor.
+                        //
+                        // Bound the drain to a single frame's worth of time so a sustained
+                        // burst (holding scroll) still renders at ~60fps instead of freezing
+                        // the view until the burst ends; remaining events are picked up on
+                        // the next loop iteration.
+                        let coalesce_deadline = Instant::now() + std::time::Duration::from_millis(16);
+                        while !self.editor.should_close() && Instant::now() < coalesce_deadline {
+                            let poll = std::future::poll_fn(|cx| {
+                                std::task::Poll::Ready(input_stream.poll_next_unpin(cx))
+                            })
+                            .await;
+                            let std::task::Poll::Ready(Some(event)) = poll else {
+                                break;
+                            };
+                            should_redraw |= self.handle_terminal_events(event);
+                        }
+
+                        if should_redraw && !self.editor.should_close() {
+                            self.render().await;
+                        }
+                    }
+                    Some(callback) = self.jobs.callbacks.recv() => {
+                        self.jobs.handle_callback(&mut self.editor, &mut self.compositor, Ok(Some(callback)));
                         self.render().await;
                     }
-                }
-                Some(callback) = self.jobs.callbacks.recv() => {
-                    self.jobs.handle_callback(&mut self.editor, &mut self.compositor, Ok(Some(callback)));
-                    self.render().await;
-                }
-                Some(msg) = self.jobs.status_messages.recv() => {
-                    let severity = match msg.severity{
-                        helix_event::status::Severity::Hint => Severity::Hint,
-                        helix_event::status::Severity::Info => Severity::Info,
-                        helix_event::status::Severity::Warning => Severity::Warning,
-                        helix_event::status::Severity::Error => Severity::Error,
-                    };
-                    self.editor.push_notification(msg.message, severity);
-                }
-                Some(callback) = self.jobs.wait_futures.next() => {
-                    self.jobs.handle_callback(&mut self.editor, &mut self.compositor, callback);
-                    self.render().await;
-                }
-                Some(req) = async {
-                    match &mut self.confirmation_rx {
-                        Some(rx) => rx.recv().await,
-                        None => std::future::pending().await,
+                    Some(msg) = self.jobs.status_messages.recv() => {
+                        let severity = match msg.severity{
+                            helix_event::status::Severity::Hint => Severity::Hint,
+                            helix_event::status::Severity::Info => Severity::Info,
+                            helix_event::status::Severity::Warning => Severity::Warning,
+                            helix_event::status::Severity::Error => Severity::Error,
+                        };
+                        self.editor.push_notification(msg.message, severity);
                     }
-                }, if self.confirmation_rx.is_some() => {
-                    let is_diag = req.tool_name == "diagnostics_publish";
-                    let summary = req.summary.clone();
-                    let _ = req.response_tx.send(true);
-                    if is_diag {
-                        self.editor.set_status(format!("MCP: {summary}"));
+                    Some(callback) = self.jobs.wait_futures.next() => {
+                        self.jobs.handle_callback(&mut self.editor, &mut self.compositor, callback);
+                        self.render().await;
                     }
-                    // Don't render immediately — let the session apply the
-                    // mutation first, then pick it up on the next render cycle.
-                    helix_event::request_redraw();
-                }
-                event = self.editor.wait_event() => {
-                    let _idle_handled = self.handle_editor_event(event).await;
+                    Some(req) = async {
+                        match &mut self.confirmation_rx {
+                            Some(rx) => rx.recv().await,
+                            None => std::future::pending().await,
+                        }
+                    }, if self.confirmation_rx.is_some() => {
+                        let is_diag = req.tool_name == "diagnostics_publish";
+                        let summary = req.summary.clone();
+                        let _ = req.response_tx.send(true);
+                        if is_diag {
+                            self.editor.set_status(format!("MCP: {summary}"));
+                        }
+                        // Don't render immediately — let the session apply the
+                        // mutation first, then pick it up on the next render cycle.
+                        helix_event::request_redraw();
+                    }
+                    event = self.editor.wait_event() => {
+                        let _idle_handled = self.handle_editor_event(event).await;
 
-                    #[cfg(feature = "integration")]
-                    {
-                        // Don't report idle while a save is still in flight, or an assertion on the post-save document state (e.g. its path,
-                        // set in `handle_document_write`) can run before the `DocumentSavedEvent` is processed. Slow file I/O on Windows
-                        // (atomic_save's rename/fsync dance over the still-open temp file) makes this race observable.
-                        // Errors produce an event too, so it cannot hang.
-                        if _idle_handled && self.editor.write_count == 0 {
-                            return true;
+                        #[cfg(feature = "integration")]
+                        {
+                            // Don't report idle while a save is still in flight, or an assertion on the post-save document state (e.g. its path,
+                            // set in `handle_document_write`) can run before the `DocumentSavedEvent` is processed. Slow file I/O on Windows
+                            // (atomic_save's rename/fsync dance over the still-open temp file) makes this race observable.
+                            // Errors produce an event too, so it cannot hang.
+                            if _idle_handled && self.editor.write_count == 0 {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            #[cfg(not(feature = "mcp"))]
+            {
+                tokio::select! {
+                    biased;
+
+                    Some(signal) = self.signals.next() => {
+                        if !self.handle_signals(signal).await {
+                            return false;
+                        };
+                    }
+                    Some(event) = input_stream.next() => {
+                        let mut should_redraw = self.handle_terminal_events(event);
+
+                        // Coalesce any input events that are already queued so a burst
+                        // of events (e.g. rapid mouse-wheel scrolling) is processed in a
+                        // single render pass instead of one expensive render per event.
+                        // We poll the stream with the real task waker (via poll_fn) rather
+                        // than `now_or_never`: termina's EventStream registers its wake task
+                        // on the *first* `Pending` poll, so a noop-waker poll would leave the
+                        // real waker unregistered and hang the editor.
+                        //
+                        // Bound the drain to a single frame's worth of time so a sustained
+                        // burst (holding scroll) still renders at ~60fps instead of freezing
+                        // the view until the burst ends; remaining events are picked up on
+                        // the next loop iteration.
+                        let coalesce_deadline = Instant::now() + std::time::Duration::from_millis(16);
+                        while !self.editor.should_close() && Instant::now() < coalesce_deadline {
+                            let poll = std::future::poll_fn(|cx| {
+                                std::task::Poll::Ready(input_stream.poll_next_unpin(cx))
+                            })
+                            .await;
+                            let std::task::Poll::Ready(Some(event)) = poll else {
+                                break;
+                            };
+                            should_redraw |= self.handle_terminal_events(event);
+                        }
+
+                        if should_redraw && !self.editor.should_close() {
+                            self.render().await;
+                        }
+                    }
+                    Some(callback) = self.jobs.callbacks.recv() => {
+                        self.jobs.handle_callback(&mut self.editor, &mut self.compositor, Ok(Some(callback)));
+                        self.render().await;
+                    }
+                    Some(msg) = self.jobs.status_messages.recv() => {
+                        let severity = match msg.severity{
+                            helix_event::status::Severity::Hint => Severity::Hint,
+                            helix_event::status::Severity::Info => Severity::Info,
+                            helix_event::status::Severity::Warning => Severity::Warning,
+                            helix_event::status::Severity::Error => Severity::Error,
+                        };
+                        self.editor.push_notification(msg.message, severity);
+                    }
+                    Some(callback) = self.jobs.wait_futures.next() => {
+                        self.jobs.handle_callback(&mut self.editor, &mut self.compositor, callback);
+                        self.render().await;
+                    }
+                    event = self.editor.wait_event() => {
+                        let _idle_handled = self.handle_editor_event(event).await;
+
+                        #[cfg(feature = "integration")]
+                        {
+                            // Don't report idle while a save is still in flight, or an assertion on the post-save document state (e.g. its path,
+                            // set in `handle_document_write`) can run before the `DocumentSavedEvent` is processed. Slow file I/O on Windows
+                            // (atomic_save's rename/fsync dance over the still-open temp file) makes this race observable.
+                            // Errors produce an event too, so it cannot hang.
+                            if _idle_handled && self.editor.write_count == 0 {
+                                return true;
+                            }
                         }
                     }
                 }
